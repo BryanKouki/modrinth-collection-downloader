@@ -15,7 +15,9 @@ scroll through the options or just type a value that isn't in the list yet.
 
 from __future__ import annotations
 
+import os
 import queue
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -60,6 +62,20 @@ DEFAULT_MC_VERSIONS = [
     "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.12.2",
 ]
 DEFAULT_LOADERS = list(LOADER_POPULARITY)
+
+
+def resource_path(relative_path: str) -> str:
+    """Resolve the path to a bundled resource (e.g. the app icon).
+
+    Works both when running from source (project root is one level above
+    this app/ package) and when running inside a PyInstaller --onefile
+    build, where bundled data files are extracted to a temp folder exposed
+    as sys._MEIPASS.
+    """
+    base_path = getattr(sys, "_MEIPASS", None)
+    if base_path is None:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 
 def sort_by_popularity(names: List[str]) -> List[str]:
@@ -184,6 +200,7 @@ class ModrinthDownloaderApp(ctk.CTk):
         self.minsize(620, 620)
         self.configure(fg_color=BG)
         ctk.set_appearance_mode("dark")
+        self._apply_app_icon()
 
         self._build_widgets()
         self.refresh_texts()
@@ -193,6 +210,29 @@ class ModrinthDownloaderApp(ctk.CTk):
     # ------------------------------------------------------------------
     # ttk styling (for the scrollbars used inside SearchableSelectList)
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # App icon (window title bar + taskbar)
+    # ------------------------------------------------------------------
+    def _apply_app_icon(self) -> None:
+        # .ico: sets the title bar and taskbar icon on Windows.
+        ico_path = resource_path("icon.ico")
+        if os.path.exists(ico_path):
+            try:
+                self.iconbitmap(ico_path)
+            except Exception:
+                pass
+
+        # .png fallback via iconphoto: covers Linux/macOS (and reinforces
+        # Windows), where iconbitmap alone may not apply everywhere.
+        png_path = resource_path("icon.png")
+        if os.path.exists(png_path):
+            try:
+                icon_image = tk.PhotoImage(file=png_path)
+                self.iconphoto(True, icon_image)
+                self._icon_photo_ref = icon_image  # keep a reference alive
+            except Exception:
+                pass
+
     def _setup_ttk_style(self) -> None:
         style = ttk.Style()
         try:
@@ -669,6 +709,12 @@ class ModrinthDownloaderApp(ctk.CTk):
         win.geometry("560x620")
         win.configure(fg_color=BG)
         win.transient(self)
+        ico_path = resource_path("icon.ico")
+        if os.path.exists(ico_path):
+            try:
+                win.after(200, lambda: win.iconbitmap(ico_path))
+            except Exception:
+                pass
 
         ctk.CTkLabel(
             win, text=t(L, "guide_title"), font=ctk.CTkFont(size=18, weight="bold"),

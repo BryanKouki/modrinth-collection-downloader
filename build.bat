@@ -26,6 +26,10 @@ if exist ModrinthCollectionDownloader.spec del /q ModrinthCollectionDownloader.s
 set ICON_ARG=
 if exist icon.ico set ICON_ARG=--icon=icon.ico
 
+set DATA_ARGS=
+if exist icon.ico set DATA_ARGS=%DATA_ARGS% --add-data "icon.ico;."
+if exist icon.png set DATA_ARGS=%DATA_ARGS% --add-data "icon.png;."
+
 echo.
 echo [3/3] Building the executable with PyInstaller...
 python -m PyInstaller ^
@@ -35,6 +39,7 @@ python -m PyInstaller ^
     --name "ModrinthCollectionDownloader" ^
     --collect-all customtkinter ^
     %ICON_ARG% ^
+    %DATA_ARGS% ^
     main.py
 
 echo.

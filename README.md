@@ -5,6 +5,12 @@ public [Modrinth](https://modrinth.com) collection in one go, sorted
 automatically into the right subfolders, or packed into a single `.zip`
 named after the collection itself.
 
+The repository includes two editions: a desktop GUI application and a
+single-file, dependency-free command-line tool (`modrinth_cli.py`) built on
+the same download logic. See [Usage](#usage) for the GUI and
+[Command-line (CLI) edition](#command-line-cli-edition) for the terminal
+version.
+
 Made by [BryanKouki](https://github.com/BryanKouki) - v1.0.0
 
 > This app only talks to `api.modrinth.com` (public read-only queries) and
@@ -20,6 +26,7 @@ Made by [BryanKouki](https://github.com/BryanKouki) - v1.0.0
 - [Overview](#overview)
 - [Features](#features)
 - [Usage](#usage)
+- [Command-line (CLI) edition](#command-line-cli-edition)
 - [How folders are organized](#how-folders-are-organized)
 - [Requirements](#requirements)
 - [Running in development mode](#running-in-development-mode)
@@ -107,6 +114,12 @@ no command-line arguments and no configuration files to edit by hand.
   do not take forever.
 - Dedicated Cancel button, centered under the main action, enabled only
   while a download is actually running.
+- Custom app icon, a green download arrow, applied to the window title bar
+  and the taskbar while the app is running, not just to the packaged
+  `.exe` file.
+- A fully self-contained, dependency-free command-line edition
+  (`modrinth_cli.py`) with the same core download logic, for scripting and
+  automation; see [Command-line (CLI) edition](#command-line-cli-edition).
 
 ---
 
@@ -139,6 +152,75 @@ no command-line arguments and no configuration files to edit by hand.
    are listed with the reason next to them, both in the app and in the
    completion popup. The full technical log, normally hidden, can be
    expanded at any time with the "Show" button next to it.
+
+---
+
+## Command-line (CLI) edition
+
+`modrinth_cli.py`, at the root of this repository, is a single Python file
+that reimplements the same download logic (categorization, dependency
+resolution, stable-release preference, per-item selection, never-overwrite
+saving) for the terminal. It has **zero external dependencies**: only the
+Python standard library is used, so there is nothing to `pip install`.
+Copy that one file anywhere with Python 3.8 or newer and run it.
+
+### Quick start
+
+Fully interactive; it prompts for anything not passed as a flag:
+
+```bash
+python modrinth_cli.py
+```
+
+Fully scripted, for automation:
+
+```bash
+python modrinth_cli.py --collection https://modrinth.com/collection/YV97U1kk \
+    --mc-version 1.21.1 --loader fabric --dest ./output --zip -y
+```
+
+Preview a collection's contents without downloading anything:
+
+```bash
+python modrinth_cli.py --collection YV97U1kk --list-items
+```
+
+Review the collection's items and choose which ones to exclude before
+downloading:
+
+```bash
+python modrinth_cli.py --collection YV97U1kk --mc-version 1.21.1 \
+    --loader fabric --dest ./output --select
+```
+
+Run `python modrinth_cli.py --help` at any time to see the full option
+list from the terminal itself.
+
+### Options
+
+| Flag | Description |
+|---|---|
+| `--collection`, `-c` | Collection ID or URL |
+| `--mc-version`, `-v` | Minecraft version (e.g. `1.21.1`) |
+| `--loader`, `-l` | Mod loader (e.g. `fabric`, `forge`, `neoforge`, `paper`) |
+| `--dest`, `-d` | Destination folder (default: current directory) |
+| `--zip` | Save as a single `.zip` instead of a folder |
+| `--no-mods` | Exclude mods, plugins and datapacks |
+| `--no-resourcepacks` | Exclude resource/texture packs |
+| `--no-shaders` | Exclude shaders |
+| `--no-deps` | Do not download required dependencies |
+| `--allow-beta` | Do not prefer stable releases; use the newest version available even if alpha/beta |
+| `--exclude` | Comma-separated project IDs/slugs to exclude from the download |
+| `--select` | Interactively review the collection's items and choose which ones to exclude |
+| `--list-items` | Print every item in the collection, with its ID, and exit without downloading |
+| `--workers` | Number of parallel download threads (default: `5`) |
+| `--lang` | Output language: `en` or `pt` (default: `en`) |
+| `-y`, `--yes` | Skip the confirmation prompt |
+| `--version` | Show the tool's version and exit |
+| `-h`, `--help` | Show the full help text and exit |
+
+Any flag left out is asked for interactively, except the boolean switches
+(`--zip`, `--no-mods`, and so on), which simply default to off.
 
 ---
 
@@ -210,10 +292,11 @@ to produce a Windows `.exe` by running the build on Linux or macOS.
 1. Install Python on Windows from
    [python.org/downloads](https://www.python.org/downloads/) and, during
    installation, check "Add python.exe to PATH".
-2. Download or clone this repository into a folder on Windows.
-3. Optionally, drop an `icon.ico` file in the project root for a custom
-   `.exe` icon.
-4. Double-click `build.bat`, or open Command Prompt in the project folder
+2. Download or clone this repository into a folder on Windows. It already
+   includes `icon.ico` and `icon.png` (a green download arrow), used both
+   for the `.exe` file itself and for the running window; replace either
+   file to use a different icon.
+3. Double-click `build.bat`, or open Command Prompt in the project folder
    and run it from there.
 
    The script does everything on its own:
@@ -249,6 +332,9 @@ python -m PyInstaller ^
     --windowed ^
     --name "ModrinthCollectionDownloader" ^
     --collect-all customtkinter ^
+    --icon=icon.ico ^
+    --add-data "icon.ico;." ^
+    --add-data "icon.png;." ^
     main.py
 ```
 
@@ -260,7 +346,8 @@ What each flag does:
 | `--windowed` | Runs without opening a console or terminal window alongside it |
 | `--name` | Sets the final executable's name |
 | `--collect-all customtkinter` | Bundles CustomTkinter's internal theme and asset files; required, since without it the `.exe` opens with a broken interface, or does not open at all |
-| `--icon=icon.ico` | Optional; uses a custom icon, and only works if `icon.ico` exists in the folder |
+| `--icon=icon.ico` | Sets the icon shown on the `.exe` file itself, before it is even opened; only works if `icon.ico` exists in the folder |
+| `--add-data "icon.ico;."` and `--add-data "icon.png;."` | Bundle the icon files inside the executable so the running app can also load them and apply the same icon to the window title bar and taskbar; without these two flags the `.exe` file icon is still correct, but the running window falls back to the default Tk icon |
 
 ---
 
@@ -299,8 +386,11 @@ double-click, to see the full error output.
 
 ```
 modrinth-collection-downloader/
-├── main.py              Entry point
-├── build.bat             Builds the .exe automatically on Windows
+├── main.py              GUI entry point
+├── modrinth_cli.py        Standalone, dependency-free command-line edition
+├── build.bat               Builds the .exe automatically on Windows
+├── icon.ico                 App icon: .exe file icon + window/taskbar icon
+├── icon.png                  App icon: cross-platform window icon fallback
 ├── requirements.txt
 ├── README.md
 └── app/
@@ -311,6 +401,10 @@ modrinth-collection-downloader/
     ├── i18n.py               English and Portuguese UI strings
     └── version.py             App name, version and author
 ```
+
+Note that `modrinth_cli.py` is fully self-contained: it does not import
+anything from `app/`, so it can be copied out and used entirely on its
+own.
 
 ---
 
@@ -359,7 +453,20 @@ No. It is only used to download the files, and can be closed right after.
 Yes, in development mode (`python main.py`), on any system with Python
 3.10 or newer. Only the `.exe` build is Windows-specific; running
 PyInstaller on Linux or macOS would produce a native binary for that
-system, not a `.exe`.
+system, not a `.exe`. The [command-line edition](#command-line-cli-edition)
+runs anywhere Python 3.8 or newer is installed, no `.exe` involved at all.
+
+**Is there a version that does not need a graphical interface?**
+
+Yes. `modrinth_cli.py` is a single, dependency-free Python file with the
+same download logic, meant for the terminal, scripting, and automation.
+See [Command-line (CLI) edition](#command-line-cli-edition).
+
+**Can I use my own icon instead of the green arrow?**
+
+Yes. Replace `icon.ico` (and, ideally, `icon.png` with the same image) in
+the project root with your own files before building. `build.bat` and the
+running app both pick them up automatically; nothing else needs to change.
 
 ---
 
@@ -374,6 +481,9 @@ system, not a `.exe`.
   local computer.
 - No telemetry, no ads, no silent auto-updates, and no execution of
   third-party scripts or code.
+- This applies equally to the command-line edition, `modrinth_cli.py`: the
+  same two domains, the same lack of telemetry, and no third-party
+  dependencies at all to audit beyond the Python standard library itself.
 
 ---
 
