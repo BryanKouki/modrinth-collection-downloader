@@ -1,7 +1,6 @@
 # Modrinth Collection Downloader
 
-Download every mod, resource/texture pack, shader, plugin and datapack from a
-public [Modrinth](https://modrinth.com) collection in one go — sorted
+Download every mod, resource/texture pack, shader, plugin and datapack from a [Modrinth](https://modrinth.com) collection in one go — sorted
 automatically into the right subfolders, or packed into a single `.zip`
 named after the collection itself.
 
