@@ -22,7 +22,7 @@ Made by [BryanKouki](https://github.com/BryanKouki) - v1.0.0
 > source is right here in this repository.
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Modrinth Collection Downloader main window" width="720">
+  <img src="docs/app-screenshot.png" alt="Modrinth Collection Downloader main window" width="720">
 </p>
 
 ---
@@ -513,7 +513,7 @@ modrinth-collection-downloader/
 │   └── unix/
 │       └── modrinth_dl.sh     Linux and macOS, in Bash
 └── docs/
-    └── screenshot.png       Screenshot used in this README
+    └── app-screenshot.png   Screenshot used in this README
 ```
 
 Note that `modrinth_cli.py` and everything under `native/` are fully
