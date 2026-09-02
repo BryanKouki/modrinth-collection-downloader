@@ -23,7 +23,7 @@ _PT: Dict[str, str] = {
 
     # Form
     "label_collection": "ID OU URL DA COLEÇÃO",
-    "placeholder_collection": "ex: YV97U1kk ou https://modrinth.com/collection/YV97U1kk",
+    "placeholder_collection": "ex: N6yU1DBr ou https://modrinth.com/collection/N6yU1DBr",
     "btn_fetch_items": "Carregar Itens",
     "btn_fetch_items_loading": "Carregando...",
 
@@ -182,7 +182,7 @@ _EN: Dict[str, str] = {
 
     # Form
     "label_collection": "COLLECTION ID OR URL",
-    "placeholder_collection": "e.g. YV97U1kk or https://modrinth.com/collection/YV97U1kk",
+    "placeholder_collection": "e.g. N6yU1DBr or https://modrinth.com/collection/N6yU1DBr",
     "btn_fetch_items": "Load Items",
     "btn_fetch_items_loading": "Loading...",
 

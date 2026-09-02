@@ -7,8 +7,8 @@ REM works out of the box, double-click or from the command line.
 REM
 REM Usage examples:
 REM   modrinth_dl.bat
-REM   modrinth_dl.bat -Collection YV97U1kk -McVersion 1.21.1 -Loader fabric -Dest .\out -Zip -Yes
-REM   modrinth_dl.bat -Collection YV97U1kk -ListItems
+REM   modrinth_dl.bat -Collection N6yU1DBr -McVersion 1.21.1 -Loader fabric -Dest .\out -Zip -Yes
+REM   modrinth_dl.bat -Collection N6yU1DBr -ListItems
 REM   modrinth_dl.bat -Help
 
 setlocal

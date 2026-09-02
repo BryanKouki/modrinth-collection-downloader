@@ -83,8 +83,8 @@ no command-line arguments and no configuration files to edit by hand.
   toggle, defaulting to English.
 - Built-in guide window explaining every field and every result category
   without leaving the app.
-- Collection input accepts both a bare ID (`YV97U1kk`) and a full URL
-  (`https://modrinth.com/collection/YV97U1kk`).
+- Collection input accepts both a bare ID (`N6yU1DBr`) and a full URL
+  (`https://modrinth.com/collection/N6yU1DBr`).
 - Optional per-item checklist: load the collection's contents and every
   mod, resource pack and shader shows up individually, grouped by
   category, checked by default. Uncheck anything you do not want before
@@ -185,21 +185,21 @@ python modrinth_cli.py
 Fully scripted, for automation:
 
 ```bash
-python modrinth_cli.py --collection https://modrinth.com/collection/YV97U1kk \
+python modrinth_cli.py --collection https://modrinth.com/collection/N6yU1DBr \
     --mc-version 1.21.1 --loader fabric --dest ./output --zip -y
 ```
 
 Preview a collection's contents without downloading anything:
 
 ```bash
-python modrinth_cli.py --collection YV97U1kk --list-items
+python modrinth_cli.py --collection N6yU1DBr --list-items
 ```
 
 Review the collection's items and choose which ones to exclude before
 downloading:
 
 ```bash
-python modrinth_cli.py --collection YV97U1kk --mc-version 1.21.1 \
+python modrinth_cli.py --collection N6yU1DBr --mc-version 1.21.1 \
     --loader fabric --dest ./output --select
 ```
 
@@ -268,10 +268,10 @@ thin launcher that just calls `modrinth_dl.ps1` sitting next to it.
 native\windows\modrinth_dl.bat
 
 :: Fully scripted
-native\windows\modrinth_dl.bat -Collection YV97U1kk -McVersion 1.21.1 -Loader fabric -Dest .\output -Zip -Yes
+native\windows\modrinth_dl.bat -Collection N6yU1DBr -McVersion 1.21.1 -Loader fabric -Dest .\output -Zip -Yes
 
 :: Just list what's in a collection
-native\windows\modrinth_dl.bat -Collection YV97U1kk -ListItems
+native\windows\modrinth_dl.bat -Collection N6yU1DBr -ListItems
 ```
 
 If Windows blocks the script the first time (SmartScreen, or a policy
@@ -311,10 +311,10 @@ chmod +x native/unix/modrinth_dl.sh
 ./native/unix/modrinth_dl.sh
 
 # Fully scripted
-./native/unix/modrinth_dl.sh -c YV97U1kk -v 1.21.1 -l fabric -d ./output --zip -y
+./native/unix/modrinth_dl.sh -c N6yU1DBr -v 1.21.1 -l fabric -d ./output --zip -y
 
 # Just list what's in a collection
-./native/unix/modrinth_dl.sh -c YV97U1kk --list-items
+./native/unix/modrinth_dl.sh -c N6yU1DBr --list-items
 ```
 
 It is written against the plain Bash that macOS ships by default

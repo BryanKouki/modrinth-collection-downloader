@@ -33,20 +33,56 @@ from .version import APP_VERSION, AUTHOR, GITHUB_URL
 # ---------------------------------------------------------------------------
 # Color palette
 # ---------------------------------------------------------------------------
-BG = "#0b0d13"
-CARD = "#141822"
-CARD_BORDER = "#242938"
-INPUT_BG = "#0e1017"
-INPUT_BORDER = "#2a2f3f"
-GREEN = "#2ecc71"
-GREEN_HOVER = "#27ae60"
-RED = "#e5534b"
-RED_HOVER = "#c9463f"
-ORANGE = "#e2a33c"
-GRAY = "#8b93a7"
-TEXT = "#e7eaf2"
-LABEL = "#9aa3ba"
-DISABLED_BG = "#1a1f2c"
+# ---------------------------------------------------------------------------
+# Color palette — the exact dark-theme tokens Modrinth's own site uses
+# (extracted from their published CSS custom properties: --surface-*,
+# --color-text-*, --color-brand, --color-red/orange/gray, --radius-*).
+# This keeps the app's colors authentically "Modrinth", while the layout
+# below stays our own compact single-card form rather than a copy of
+# their page structure.
+# ---------------------------------------------------------------------------
+BG = "#16181c"              # --surface-1 (page background)
+CARD = "#27292e"            # --surface-3 (--color-raised-bg)
+CARD_BORDER = "#34363c"     # --surface-4 (--color-button-bg / divider)
+INPUT_BG = "#1d1f23"        # --surface-2
+INPUT_BORDER = "#34363c"    # --surface-4
+GREEN = "#1bd96a"           # --color-green-500 (--color-brand)
+GREEN_HOVER = "#0faa4f"     # --color-green-600
+RED = "#ff496e"             # --color-red-500
+RED_HOVER = "#c8083d"       # --color-red-700
+ORANGE = "#ffa347"          # --color-orange-400
+GRAY = "#9fa4b3"            # --color-gray-500 (--color-secondary base)
+TEXT = "#ffffff"            # --color-text-primary
+LABEL = "#96a2b0"           # --color-text-tertiary (--color-secondary)
+BASE_TEXT = "#b0bac5"       # --color-text-default (--color-base)
+ACCENT_CONTRAST = "#000000"  # --color-accent-contrast (text on brand-green buttons)
+DISABLED_BG = "#1a1c20"     # --surface-1-5
+
+# Radius scale (--radius-sm/md/lg), used consistently instead of ad hoc values.
+RADIUS_SM = 8
+RADIUS_MD = 12
+RADIUS_LG = 16
+
+# Official per-loader accent colors, straight from Modrinth's own
+# --color-platform-* tokens — used to color the mod loader list so each
+# entry reads the same way it does on the real site.
+LOADER_COLORS = {
+    "fabric": "#dbb69b",
+    "quilt": "#c796f9",
+    "forge": "#959eef",
+    "neoforge": "#f99e6b",
+    "liteloader": "#7ab0ee",
+    "bukkit": "#f6af7b",
+    "bungeecord": "#d2c080",
+    "folia": "#a5e388",
+    "paper": "#ee8888",
+    "purpur": "#c3abf7",
+    "spigot": "#f1cc84",
+    "velocity": "#83d5ef",
+    "waterfall": "#78a4fb",
+    "sponge": "#f9e580",
+    "datapack": "#b4bac5",
+}
 
 # Loaders ordered by real-world popularity — unknown loaders returned by the
 # API (e.g. a brand-new one) are appended alphabetically after these.
@@ -105,9 +141,10 @@ class SearchableSelectList(ctk.CTkFrame):
     """
 
     def __init__(self, master, items: Optional[List[str]] = None, placeholder: str = "",
-                 list_height: int = 4, **kwargs):
+                 list_height: int = 4, item_colors: Optional[dict] = None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         self._all_items: List[str] = list(items or [])
+        self._item_colors = item_colors or {}
 
         self.entry = ctk.CTkEntry(
             self, height=32, placeholder_text=placeholder,
@@ -125,7 +162,7 @@ class SearchableSelectList(ctk.CTkFrame):
 
         self.listbox = tk.Listbox(
             list_container, height=list_height, bg=INPUT_BG, fg=TEXT, bd=0, highlightthickness=0,
-            selectbackground=GREEN, selectforeground="#06110a",
+            selectbackground=GREEN, selectforeground=ACCENT_CONTRAST,
             activestyle="none", font=("Segoe UI", 10),
             yscrollcommand=scrollbar.set,
         )
@@ -139,6 +176,9 @@ class SearchableSelectList(ctk.CTkFrame):
         self.listbox.delete(0, "end")
         for item in items:
             self.listbox.insert("end", item)
+            color = self._item_colors.get(item.lower())
+            if color:
+                self.listbox.itemconfig(self.listbox.size() - 1, foreground=color)
 
     def _on_search_changed(self, _event=None) -> None:
         query = self.entry.get().strip().lower()
@@ -262,7 +302,7 @@ class ModrinthDownloaderApp(ctk.CTk):
     def _checkbox(self, parent, key: str, variable, **kw) -> ctk.CTkCheckBox:
         chk = ctk.CTkCheckBox(
             parent, text="", variable=variable, fg_color=GREEN, hover_color=GREEN_HOVER,
-            text_color=TEXT, checkmark_color="#06110a", **kw,
+            text_color=TEXT, checkmark_color=ACCENT_CONTRAST, **kw,
         )
         self._i18n_targets.append((chk, key))
         return chk
@@ -340,7 +380,7 @@ class ModrinthDownloaderApp(ctk.CTk):
         self.lbl_subtitle.pack(fill="x", pady=(3, 0))
 
     def _build_collection_card(self, parent) -> None:
-        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=12, border_width=1, border_color=CARD_BORDER)
+        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=RADIUS_LG, border_width=1, border_color=CARD_BORDER)
         card.pack(fill="x", pady=(0, 14))
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=20, pady=18)
@@ -418,7 +458,7 @@ class ModrinthDownloaderApp(ctk.CTk):
         self._render_items_checklist()
 
     def _build_main_card(self, parent) -> None:
-        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=12, border_width=1, border_color=CARD_BORDER)
+        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=RADIUS_LG, border_width=1, border_color=CARD_BORDER)
         card.pack(fill="x", pady=(0, 14))
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=20, pady=18)
@@ -438,7 +478,7 @@ class ModrinthDownloaderApp(ctk.CTk):
         self.list_version.grid(row=row, column=0, sticky="ew", pady=(6, 2))
         self._i18n_placeholders.append((self.list_version.entry, "placeholder_mc_version"))
 
-        self.list_loader = SearchableSelectList(inner, items=DEFAULT_LOADERS, list_height=4)
+        self.list_loader = SearchableSelectList(inner, items=DEFAULT_LOADERS, list_height=4, item_colors=LOADER_COLORS)
         self.list_loader.grid(row=row, column=1, sticky="ew", padx=(14, 0), pady=(6, 2))
         self.list_loader.set("fabric")
         self._i18n_placeholders.append((self.list_loader.entry, "placeholder_loader"))
@@ -534,8 +574,8 @@ class ModrinthDownloaderApp(ctk.CTk):
 
         # Download CTA
         self.btn_download = self._button(
-            inner, "btn_download", height=42, corner_radius=10,
-            fg_color=GREEN, hover_color=GREEN_HOVER, text_color="#06110a",
+            inner, "btn_download", height=42, corner_radius=RADIUS_MD,
+            fg_color=GREEN, hover_color=GREEN_HOVER, text_color=ACCENT_CONTRAST,
             font=ctk.CTkFont(size=15, weight="bold"),
             command=self._on_download_clicked,
         )
@@ -544,7 +584,7 @@ class ModrinthDownloaderApp(ctk.CTk):
 
         # Cancel button — centered, only usable while a download is running.
         self.btn_cancel = self._button(
-            inner, "btn_cancel", width=140, height=30, corner_radius=8,
+            inner, "btn_cancel", width=140, height=30, corner_radius=RADIUS_SM,
             fg_color=DISABLED_BG, hover_color=DISABLED_BG, text_color=LABEL,
             state="disabled", command=self._on_cancel_clicked,
         )
@@ -557,12 +597,12 @@ class ModrinthDownloaderApp(ctk.CTk):
         row += 1
 
         self.lbl_status = self._label(
-            inner, "status_idle", font=ctk.CTkFont(size=12), text_color=GRAY, anchor="w",
+            inner, "status_idle", font=ctk.CTkFont(size=12), text_color=BASE_TEXT, anchor="w",
         )
         self.lbl_status.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     def _build_results(self, parent) -> None:
-        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=12, border_width=1, border_color=CARD_BORDER)
+        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=RADIUS_LG, border_width=1, border_color=CARD_BORDER)
         card.pack(fill="x", pady=(0, 14))
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=18, pady=16)
@@ -594,7 +634,7 @@ class ModrinthDownloaderApp(ctk.CTk):
         self._set_details_placeholder()
 
     def _stat_box(self, parent, color: str, col: int) -> dict:
-        box = ctk.CTkFrame(parent, fg_color=INPUT_BG, corner_radius=10)
+        box = ctk.CTkFrame(parent, fg_color=INPUT_BG, corner_radius=RADIUS_MD)
         box.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 8, 0))
         value = ctk.CTkLabel(box, text="0", font=ctk.CTkFont(size=18, weight="bold"), text_color=color)
         value.pack(pady=(8, 0))
@@ -605,7 +645,7 @@ class ModrinthDownloaderApp(ctk.CTk):
         return {"box": box, "value": value, "label": label}
 
     def _build_log(self, parent) -> None:
-        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=12, border_width=1, border_color=CARD_BORDER)
+        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=RADIUS_LG, border_width=1, border_color=CARD_BORDER)
         card.pack(fill="x", pady=(0, 14))
         self.log_inner = ctk.CTkFrame(card, fg_color="transparent")
         self.log_inner.pack(fill="both", expand=True, padx=18, pady=14)
@@ -731,7 +771,7 @@ class ModrinthDownloaderApp(ctk.CTk):
 
         ctk.CTkButton(
             win, text=t(L, "btn_close"), fg_color=GREEN, hover_color=GREEN_HOVER,
-            text_color="#06110a", command=win.destroy,
+            text_color=ACCENT_CONTRAST, command=win.destroy,
         ).pack(pady=(0, 18))
 
     # ------------------------------------------------------------------
@@ -857,7 +897,7 @@ class ModrinthDownloaderApp(ctk.CTk):
                 cb = ctk.CTkCheckBox(
                     self.items_inner, text=item["name"], variable=var,
                     fg_color=GREEN, hover_color=GREEN_HOVER, text_color=TEXT,
-                    checkmark_color="#06110a", font=ctk.CTkFont(size=12),
+                    checkmark_color=ACCENT_CONTRAST, font=ctk.CTkFont(size=12),
                     bg_color=INPUT_BG,
                 )
                 cb.pack(fill="x", anchor="w", padx=10, pady=1)
@@ -1069,7 +1109,7 @@ class ModrinthDownloaderApp(ctk.CTk):
             state="normal" if running else "disabled",
             fg_color=RED if running else DISABLED_BG,
             hover_color=RED_HOVER if running else DISABLED_BG,
-            text_color="#ffffff" if running else LABEL,
+            text_color=TEXT if running else LABEL,
         )
         self.lbl_status.configure(text=t(self.lang, "status_running" if running else "status_idle"))
         if not running:

@@ -23,17 +23,17 @@ Fully interactive (it will ask for anything missing):
 Fully scripted, for automation:
 
     python modrinth_cli.py \
-        --collection https://modrinth.com/collection/YV97U1kk \
+        --collection https://modrinth.com/collection/N6yU1DBr \
         --version 1.21.1 --loader fabric \
         --dest ./output --zip -y
 
 Just look at what's inside a collection without downloading anything:
 
-    python modrinth_cli.py --collection YV97U1kk --list-items
+    python modrinth_cli.py --collection N6yU1DBr --list-items
 
 Review and exclude specific items interactively before downloading:
 
-    python modrinth_cli.py --collection YV97U1kk --version 1.21.1 \
+    python modrinth_cli.py --collection N6yU1DBr --version 1.21.1 \
         --loader fabric --dest ./output --select
 
 Run with -h / --help to see every available option.
@@ -634,9 +634,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  python modrinth_cli.py\n"
-            "  python modrinth_cli.py -c YV97U1kk -v 1.21.1 -l fabric -d ./out -y\n"
-            "  python modrinth_cli.py -c YV97U1kk --list-items\n"
-            "  python modrinth_cli.py -c YV97U1kk -v 1.21.1 -l fabric -d ./out --select\n"
+            "  python modrinth_cli.py -c N6yU1DBr -v 1.21.1 -l fabric -d ./out -y\n"
+            "  python modrinth_cli.py -c N6yU1DBr --list-items\n"
+            "  python modrinth_cli.py -c N6yU1DBr -v 1.21.1 -l fabric -d ./out --select\n"
         ),
     )
     parser.add_argument(

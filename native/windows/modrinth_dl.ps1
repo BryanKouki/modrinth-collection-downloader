@@ -43,10 +43,10 @@
     Fully interactive: asks for anything not passed as a parameter.
 
 .EXAMPLE
-    .\modrinth_dl.ps1 -Collection YV97U1kk -McVersion 1.21.1 -Loader fabric -Dest .\output -Zip -Yes
+    .\modrinth_dl.ps1 -Collection N6yU1DBr -McVersion 1.21.1 -Loader fabric -Dest .\output -Zip -Yes
 
 .EXAMPLE
-    .\modrinth_dl.ps1 -Collection YV97U1kk -ListItems
+    .\modrinth_dl.ps1 -Collection N6yU1DBr -ListItems
 
 .NOTES
     Safety: this script only queries Modrinth's public API (api.modrinth.com)
@@ -191,8 +191,8 @@ Usage: modrinth_dl.ps1 [options]
 
 Examples:
   .\modrinth_dl.ps1
-  .\modrinth_dl.ps1 -Collection YV97U1kk -McVersion 1.21.1 -Loader fabric -Dest .\out -Zip -Yes
-  .\modrinth_dl.ps1 -Collection YV97U1kk -ListItems
+  .\modrinth_dl.ps1 -Collection N6yU1DBr -McVersion 1.21.1 -Loader fabric -Dest .\out -Zip -Yes
+  .\modrinth_dl.ps1 -Collection N6yU1DBr -ListItems
 "@
 }
 

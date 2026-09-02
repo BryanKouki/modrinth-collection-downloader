@@ -20,10 +20,10 @@
 #   ./modrinth_dl.sh
 #       Fully interactive: asks for anything not passed as a flag.
 #
-#   ./modrinth_dl.sh -c YV97U1kk -v 1.21.1 -l fabric -d ./output --zip -y
+#   ./modrinth_dl.sh -c N6yU1DBr -v 1.21.1 -l fabric -d ./output --zip -y
 #       Fully scripted, for automation.
 #
-#   ./modrinth_dl.sh -c YV97U1kk --list-items
+#   ./modrinth_dl.sh -c N6yU1DBr --list-items
 #       Just print the collection's contents and exit.
 #
 # Run with -h / --help to see every option.
@@ -306,8 +306,8 @@ Usage: modrinth_dl.sh [options]
 
 Examples:
   ./modrinth_dl.sh
-  ./modrinth_dl.sh -c YV97U1kk -v 1.21.1 -l fabric -d ./out --zip -y
-  ./modrinth_dl.sh -c YV97U1kk --list-items
+  ./modrinth_dl.sh -c N6yU1DBr -v 1.21.1 -l fabric -d ./out --zip -y
+  ./modrinth_dl.sh -c N6yU1DBr --list-items
 HELP
 }
 
