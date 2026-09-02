@@ -5,11 +5,13 @@ public [Modrinth](https://modrinth.com) collection in one go, sorted
 automatically into the right subfolders, or packed into a single `.zip`
 named after the collection itself.
 
-The repository includes two editions: a desktop GUI application and a
-single-file, dependency-free command-line tool (`modrinth_cli.py`) built on
-the same download logic. See [Usage](#usage) for the GUI and
-[Command-line (CLI) edition](#command-line-cli-edition) for the terminal
-version.
+The repository includes three editions, all built on the same download
+logic: a desktop GUI application, a single-file dependency-free Python CLI
+(`modrinth_cli.py`), and native scripts for Windows, Linux and macOS that
+do not require Python at all. See [Usage](#usage) for the GUI,
+[Command-line (CLI) edition](#command-line-cli-edition) for the Python
+terminal version, and [Native OS scripts](#native-os-scripts-no-python-required)
+for the Python-free versions.
 
 Made by [BryanKouki](https://github.com/BryanKouki) - v1.0.0
 
@@ -19,6 +21,10 @@ Made by [BryanKouki](https://github.com/BryanKouki) - v1.0.0
 > execution of third-party code. It just downloads files, and the full
 > source is right here in this repository.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Modrinth Collection Downloader main window" width="720">
+</p>
+
 ---
 
 ## Table of contents
@@ -27,6 +33,7 @@ Made by [BryanKouki](https://github.com/BryanKouki) - v1.0.0
 - [Features](#features)
 - [Usage](#usage)
 - [Command-line (CLI) edition](#command-line-cli-edition)
+- [Native OS scripts (no Python required)](#native-os-scripts-no-python-required)
 - [How folders are organized](#how-folders-are-organized)
 - [Requirements](#requirements)
 - [Running in development mode](#running-in-development-mode)
@@ -120,6 +127,9 @@ no command-line arguments and no configuration files to edit by hand.
 - A fully self-contained, dependency-free command-line edition
   (`modrinth_cli.py`) with the same core download logic, for scripting and
   automation; see [Command-line (CLI) edition](#command-line-cli-edition).
+- Native scripts for Windows (PowerShell/`.bat`), Linux and macOS (Bash)
+  that need no Python at all, built entirely on tools each OS already
+  ships with; see [Native OS scripts](#native-os-scripts-no-python-required).
 
 ---
 
@@ -221,6 +231,102 @@ list from the terminal itself.
 
 Any flag left out is asked for interactively, except the boolean switches
 (`--zip`, `--no-mods`, and so on), which simply default to off.
+
+---
+
+## Native OS scripts (no Python required)
+
+For Windows, Linux, and macOS, `native/` also has a version that needs
+**no Python at all** — each one is built entirely on tools that already
+ship with the operating system:
+
+```
+native/
+├── windows/
+│   ├── modrinth_dl.bat     Double-click launcher (thin wrapper)
+│   └── modrinth_dl.ps1     The actual logic, in PowerShell
+└── unix/
+    └── modrinth_dl.sh      Linux and macOS, in Bash
+```
+
+They cover the same core functionality as `modrinth_cli.py` (categorized
+folders, dependency resolution, stable-release preference, exclusion by
+ID, `.zip` or folder output, never overwriting an existing destination,
+bilingual output) using only what Windows, Linux, and macOS already
+include. They download sequentially rather than in parallel, trading a
+bit of speed for scripts that are much simpler and easier to audit line
+by line.
+
+### Windows: `modrinth_dl.bat`
+
+Runs on **PowerShell 5.1**, which ships with every Windows 10 and 11
+install — nothing to download, nothing to enable. `modrinth_dl.bat` is a
+thin launcher that just calls `modrinth_dl.ps1` sitting next to it.
+
+```bat
+:: Fully interactive
+native\windows\modrinth_dl.bat
+
+:: Fully scripted
+native\windows\modrinth_dl.bat -Collection YV97U1kk -McVersion 1.21.1 -Loader fabric -Dest .\output -Zip -Yes
+
+:: Just list what's in a collection
+native\windows\modrinth_dl.bat -Collection YV97U1kk -ListItems
+```
+
+If Windows blocks the script the first time (SmartScreen, or a policy
+restricting `.ps1` execution), the `.bat` already launches PowerShell with
+`-ExecutionPolicy Bypass` scoped to that one run only, so this normally is
+not an issue; no system-wide policy change is made.
+
+Run `native\windows\modrinth_dl.bat -Help` to see every option — they
+mirror `modrinth_cli.py`'s flags, spelled the PowerShell way
+(`-McVersion`, `-Loader`, `-Zip`, `-NoMods`, `-Exclude`, `-ListItems`,
+`-Lang`, `-Yes`, and so on).
+
+### Linux and macOS: `modrinth_dl.sh`
+
+A Bash script using only `curl` (already on both operating systems) and
+`jq` for reading the API's JSON responses. `jq` is one command away if it
+is not already installed:
+
+```bash
+# Debian/Ubuntu
+sudo apt install curl jq
+
+# Fedora
+sudo dnf install curl jq
+
+# Arch
+sudo pacman -S curl jq
+
+# macOS (curl is preinstalled)
+brew install jq
+```
+
+```bash
+chmod +x native/unix/modrinth_dl.sh
+
+# Fully interactive
+./native/unix/modrinth_dl.sh
+
+# Fully scripted
+./native/unix/modrinth_dl.sh -c YV97U1kk -v 1.21.1 -l fabric -d ./output --zip -y
+
+# Just list what's in a collection
+./native/unix/modrinth_dl.sh -c YV97U1kk --list-items
+```
+
+It is written against the plain Bash that macOS ships by default
+(version 3.2), not just modern Bash, so it works without installing
+anything else first. Saving as `--zip` additionally requires the `zip`
+command, which is preinstalled on macOS and most Linux desktop distributions
+(`sudo apt install zip` on a minimal Debian/Ubuntu system that lacks it).
+
+Run `./native/unix/modrinth_dl.sh --help` to see every option — the flags
+match `modrinth_cli.py` exactly (`-v`/`--mc-version`, `-l`/`--loader`,
+`--zip`, `--no-mods`, `--exclude`, `--list-items`, `--lang`, `-y`, and so
+on).
 
 ---
 
@@ -387,24 +493,32 @@ double-click, to see the full error output.
 ```
 modrinth-collection-downloader/
 ├── main.py              GUI entry point
-├── modrinth_cli.py        Standalone, dependency-free command-line edition
+├── modrinth_cli.py        Standalone, dependency-free Python CLI edition
 ├── build.bat               Builds the .exe automatically on Windows
 ├── icon.ico                 App icon: .exe file icon + window/taskbar icon
 ├── icon.png                  App icon: cross-platform window icon fallback
 ├── requirements.txt
 ├── README.md
-└── app/
-    ├── __init__.py
-    ├── api.py             Public Modrinth API client
-    ├── downloader.py       Orchestrates downloading and organizing the collection
-    ├── gui.py               Graphical interface (CustomTkinter)
-    ├── i18n.py               English and Portuguese UI strings
-    └── version.py             App name, version and author
+├── app/
+│   ├── __init__.py
+│   ├── api.py             Public Modrinth API client
+│   ├── downloader.py       Orchestrates downloading and organizing the collection
+│   ├── gui.py               Graphical interface (CustomTkinter)
+│   ├── i18n.py               English and Portuguese UI strings
+│   └── version.py             App name, version and author
+├── native/               No-Python-required editions
+│   ├── windows/
+│   │   ├── modrinth_dl.bat   Double-click launcher (thin wrapper)
+│   │   └── modrinth_dl.ps1   Full logic, in PowerShell
+│   └── unix/
+│       └── modrinth_dl.sh     Linux and macOS, in Bash
+└── docs/
+    └── screenshot.png       Screenshot used in this README
 ```
 
-Note that `modrinth_cli.py` is fully self-contained: it does not import
-anything from `app/`, so it can be copied out and used entirely on its
-own.
+Note that `modrinth_cli.py` and everything under `native/` are fully
+self-contained: none of them import from `app/`, so any of them can be
+copied out and used entirely on its own.
 
 ---
 
@@ -454,13 +568,26 @@ Yes, in development mode (`python main.py`), on any system with Python
 3.10 or newer. Only the `.exe` build is Windows-specific; running
 PyInstaller on Linux or macOS would produce a native binary for that
 system, not a `.exe`. The [command-line edition](#command-line-cli-edition)
-runs anywhere Python 3.8 or newer is installed, no `.exe` involved at all.
+runs anywhere Python 3.8 or newer is installed, and the
+[native Unix script](#native-os-scripts-no-python-required) covers Linux
+and macOS with no Python involved at all.
 
 **Is there a version that does not need a graphical interface?**
 
-Yes. `modrinth_cli.py` is a single, dependency-free Python file with the
-same download logic, meant for the terminal, scripting, and automation.
-See [Command-line (CLI) edition](#command-line-cli-edition).
+Yes, two of them. `modrinth_cli.py` is a single, dependency-free Python
+file with the same download logic, meant for the terminal, scripting, and
+automation; see [Command-line (CLI) edition](#command-line-cli-edition).
+There are also native scripts for Windows, Linux, and macOS that need no
+Python at all; see [Native OS scripts](#native-os-scripts-no-python-required).
+
+**What is the difference between `modrinth_cli.py` and the native scripts?**
+
+Same core logic and very similar options, but `modrinth_cli.py` needs
+Python installed and downloads in parallel (faster on large collections),
+while the native scripts (`modrinth_dl.ps1`/`.bat` on Windows,
+`modrinth_dl.sh` on Linux/macOS) need no Python at all — only what the
+operating system already ships with — and download sequentially, which is
+simpler and easier to audit at the cost of some speed.
 
 **Can I use my own icon instead of the green arrow?**
 
@@ -484,6 +611,10 @@ running app both pick them up automatically; nothing else needs to change.
 - This applies equally to the command-line edition, `modrinth_cli.py`: the
   same two domains, the same lack of telemetry, and no third-party
   dependencies at all to audit beyond the Python standard library itself.
+- It also applies to the native scripts under `native/`: the same two
+  domains, and nothing to audit beyond PowerShell/Bash plus, for the Unix
+  script, `curl` and `jq` — both widely used, independently maintained
+  tools, not something bundled or controlled by this project.
 
 ---
 
