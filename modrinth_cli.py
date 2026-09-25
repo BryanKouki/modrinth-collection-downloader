@@ -57,6 +57,7 @@ import tempfile
 import threading
 import urllib.error
 import urllib.request
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
@@ -120,6 +121,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "error_no_loader": "No mod loader was given.",
         "error_no_destination": "No destination folder was given.",
         "error_no_category": "At least one of --no-mods / --no-resourcepacks / --no-shaders must be left enabled.",
+        "error_mrpack_unsupported_loader": ".mrpack only supports the fabric, forge, neoforge or quilt loaders. Pick one of those, or choose a different save format.",
         "info_fetching_collection": "Fetching collection information...",
         "info_collection_found": "Collection found: '{name}' with {count} item(s).",
         "info_fetching_items": "Fetching item details ({count} item(s))...",
@@ -150,6 +152,12 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "log_processing_dependencies": "Processing {count} required dependency(ies) of {name}...",
         "log_dependency_of": "  [DEPENDENCY of {parent}] {message}",
         "log_zipping": "Zipping files into {name}.zip...",
+        "log_resolving_loader_version": "Resolving the latest {loader} loader version...",
+        "log_loader_version_resolved": "Using {loader} version {version}.",
+        "log_loader_version_unknown": "Could not automatically determine the {loader} loader version — you may need to set it manually after importing the pack.",
+        "log_building_mrpack": "Building the .mrpack file...",
+        "log_mrpack_file_added": "OK: {name} added to the modpack index.",
+        "log_mrpack_unsupported_category": "SKIPPED: {name} - '{type}' files aren't supported in .mrpack (only mods, resource packs and shaders are).",
         "log_moving": "Moving files to {path}...",
         "log_done": "Download finished.",
         "reason_project_not_found": "Could not fetch the project's details (removed, or a network error occurred).",
@@ -182,6 +190,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "error_no_loader": "Nenhum mod loader foi informado.",
         "error_no_destination": "Nenhuma pasta de destino foi informada.",
         "error_no_category": "Pelo menos uma entre --no-mods / --no-resourcepacks / --no-shaders precisa ficar habilitada.",
+        "error_mrpack_unsupported_loader": ".mrpack só é compatível com os loaders fabric, forge, neoforge ou quilt. Escolha um deles, ou selecione outro formato pra salvar.",
         "info_fetching_collection": "Buscando informações da coleção...",
         "info_collection_found": "Coleção encontrada: '{name}' com {count} item(ns).",
         "info_fetching_items": "Buscando detalhes dos itens ({count} item(ns))...",
@@ -212,6 +221,12 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "log_processing_dependencies": "Processando {count} dependência(s) obrigatória(s) de {name}...",
         "log_dependency_of": "  [DEPENDÊNCIA de {parent}] {message}",
         "log_zipping": "Compactando arquivos em {name}.zip...",
+        "log_resolving_loader_version": "Resolvendo a versão mais recente do loader {loader}...",
+        "log_loader_version_resolved": "Usando {loader} versão {version}.",
+        "log_loader_version_unknown": "Não foi possível determinar automaticamente a versão do loader {loader} — talvez seja necessário ajustar manualmente depois de importar o pacote.",
+        "log_building_mrpack": "Montando o arquivo .mrpack...",
+        "log_mrpack_file_added": "OK: {name} adicionado ao índice do modpack.",
+        "log_mrpack_unsupported_category": "IGNORADO: {name} - arquivos do tipo '{type}' não são suportados em .mrpack (só mods, resource packs e shaders são).",
         "log_moving": "Movendo arquivos para {path}...",
         "log_done": "Download finalizado.",
         "reason_project_not_found": "Não foi possível obter os dados do projeto (removido, ou erro de rede).",
@@ -390,6 +405,118 @@ def sort_loaders_by_popularity(names: List[str]) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# .mrpack (Modrinth Modpack) export
+# ---------------------------------------------------------------------------
+# A .mrpack only needs each file's official download URL and hash — both
+# already included in the version data the Modrinth API returns — so
+# building one requires no extra file downloads at all. Resolving a
+# concrete *version* for the chosen loader, though, needs each loader's own
+# official metadata API (the Modrinth API only knows the loader's name):
+#
+#   Fabric   -> meta.fabricmc.net      Forge    -> files.minecraftforge.net
+#   Quilt    -> meta.quiltmc.org       NeoForge -> maven.neoforged.net
+#
+# These are only ever contacted when --mrpack is used.
+
+MRPACK_DEPENDENCY_KEY: Dict[str, str] = {
+    "fabric": "fabric-loader",
+    "quilt": "quilt-loader",
+    "forge": "forge",
+    "neoforge": "neoforge",
+}
+MRPACK_SUPPORTED_LOADERS = set(MRPACK_DEPENDENCY_KEY)
+MRPACK_SUPPORTED_FOLDERS = {"mods", "resourcepacks", "shaderpacks"}
+
+
+def is_mrpack_loader_supported(loader: str) -> bool:
+    return loader.lower() in MRPACK_SUPPORTED_LOADERS
+
+
+def http_get_json(url: str) -> Optional[dict]:
+    """Like api_get(), but for an arbitrary external URL (loader metadata APIs)."""
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, ValueError, OSError):
+        return None
+
+
+def get_latest_loader_version(loader: str, mc_version: str) -> Optional[str]:
+    """Best-effort fetch of the latest/recommended version of `loader` for
+    `mc_version`. Returns None on any failure — callers should treat that as
+    "let the person set it manually later", not a fatal error."""
+    loader = loader.lower()
+    try:
+        if loader == "fabric":
+            versions = http_get_json("https://meta.fabricmc.net/v2/versions/loader") or []
+            stable = [v for v in versions if v.get("loader", {}).get("stable")]
+            pick = stable[0] if stable else (versions[0] if versions else None)
+            return pick["loader"]["version"] if pick else None
+
+        if loader == "quilt":
+            versions = http_get_json("https://meta.quiltmc.org/v3/versions/loader") or []
+            return versions[0]["version"] if versions else None
+
+        if loader == "forge":
+            data = http_get_json("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json") or {}
+            promos = data.get("promos", {})
+            return promos.get(f"{mc_version}-recommended") or promos.get(f"{mc_version}-latest")
+
+        if loader == "neoforge":
+            data = http_get_json("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge") or {}
+            versions = data.get("versions", [])
+            parts = mc_version.split(".")
+            if len(parts) >= 2:
+                minor = parts[1]
+                patch = parts[2] if len(parts) > 2 else "0"
+                prefix = f"{minor}.{patch}."
+                matching = [v for v in versions if v.startswith(prefix)]
+                if matching:
+                    return matching[-1]
+            return versions[-1] if versions else None
+    except (KeyError, IndexError, TypeError):
+        return None
+    return None
+
+
+def build_mrpack_file_entry(
+    folder: str, filename: str, url: str, size: int,
+    hashes: Optional[Dict[str, str]], client_side: str, server_side: str,
+) -> dict:
+    entry_hashes = {k: v for k, v in (hashes or {}).items() if k in ("sha1", "sha512")}
+    return {
+        "path": f"{folder}/{filename}",
+        "hashes": entry_hashes,
+        "env": {"client": client_side or "required", "server": server_side or "required"},
+        "downloads": [url],
+        "fileSize": size or 0,
+    }
+
+
+def build_mrpack_index(
+    name: str, mc_version: str, loader: str, loader_version: Optional[str], files: List[dict],
+) -> dict:
+    dependencies: Dict[str, str] = {"minecraft": mc_version}
+    dep_key = MRPACK_DEPENDENCY_KEY.get(loader.lower())
+    if dep_key and loader_version:
+        dependencies[dep_key] = loader_version
+    return {
+        "formatVersion": 1,
+        "game": "minecraft",
+        "versionId": "1.0.0",
+        "name": name,
+        "files": files,
+        "dependencies": dependencies,
+    }
+
+
+def write_mrpack(index_data: dict, output_path: str) -> None:
+    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("modrinth.index.json", json.dumps(index_data, indent=2, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------------------
 # Options / result data structures
 # ---------------------------------------------------------------------------
 
@@ -403,7 +530,7 @@ class Options:
     include_shaders: bool = True
     download_dependencies: bool = True
     prefer_stable: bool = True
-    save_as_zip: bool = False
+    save_mode: str = "folder"  # "folder" | "zip" | "mrpack"
     destination_dir: str = "."
     max_workers: int = 5
     excluded_project_ids: Set[str] = field(default_factory=set)
@@ -425,6 +552,8 @@ class Result:
     incompatible: List[ResultItem] = field(default_factory=list)
     skipped: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    mrpack_files: List[dict] = field(default_factory=list)
+    mrpack_loader_version: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +587,18 @@ def run_download(options: Options) -> Result:
     collection_name = sanitize_filename(collection.get("name") or collection_id)
     result.collection_name = collection_name
     log(t("info_collection_found", name=collection.get("name") or collection_id, count=len(project_ids)))
+
+    if options.save_mode == "mrpack":
+        if not is_mrpack_loader_supported(options.loader):
+            result.error = t("error_mrpack_unsupported_loader")
+            log(result.error)
+            return result
+        log(t("log_resolving_loader_version", loader=options.loader))
+        result.mrpack_loader_version = get_latest_loader_version(options.loader, options.mc_version)
+        if result.mrpack_loader_version:
+            log(t("log_loader_version_resolved", loader=options.loader, version=result.mrpack_loader_version))
+        else:
+            log(t("log_loader_version_unknown", loader=options.loader))
 
     work_root = tempfile.mkdtemp(prefix="modrinth_cli_")
     work_dir = os.path.join(work_root, collection_name)
@@ -537,6 +678,25 @@ def run_download(options: Options) -> Result:
 
             folder = categorize(project_type, chosen.get("loaders", []))
             filename = file_info["filename"]
+
+            if options.save_mode == "mrpack":
+                if folder not in MRPACK_SUPPORTED_FOLDERS:
+                    log_line("log_mrpack_unsupported_category", name=display_name, type=folder)
+                    with result_lock:
+                        result.skipped.append(display_name)
+                    return
+                entry = build_mrpack_file_entry(
+                    folder=folder, filename=filename, url=file_info["url"],
+                    size=file_info.get("size", 0), hashes=file_info.get("hashes"),
+                    client_side=project.get("client_side", "required"),
+                    server_side=project.get("server_side", "required"),
+                )
+                log_line("log_mrpack_file_added", name=display_name)
+                with result_lock:
+                    result.mrpack_files.append(entry)
+                    result.success.append(display_name)
+                return
+
             dest_path = os.path.join(work_dir, folder, filename)
 
             log_line("log_downloading", name=display_name, filename=filename)
@@ -561,11 +721,22 @@ def run_download(options: Options) -> Result:
             future.result()
 
     try:
-        if options.save_as_zip:
+        if options.save_mode == "zip":
             log(t("log_zipping", name=collection_name))
             zip_base = unique_path(os.path.join(options.destination_dir, collection_name), ".zip")
             shutil.make_archive(zip_base, "zip", root_dir=work_root, base_dir=collection_name)
             result.output_path = zip_base + ".zip"
+        elif options.save_mode == "mrpack":
+            log(t("log_building_mrpack"))
+            os.makedirs(options.destination_dir, exist_ok=True)
+            index_data = build_mrpack_index(
+                name=collection.get("name") or collection_name,
+                mc_version=options.mc_version, loader=options.loader,
+                loader_version=result.mrpack_loader_version, files=result.mrpack_files,
+            )
+            mrpack_base = unique_path(os.path.join(options.destination_dir, collection_name), ".mrpack")
+            write_mrpack(index_data, mrpack_base + ".mrpack")
+            result.output_path = mrpack_base + ".mrpack"
         else:
             log(t("log_moving", path=options.destination_dir))
             final_dir = unique_path(os.path.join(options.destination_dir, collection_name), "")
@@ -648,6 +819,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loader", "-l", help="Mod loader (e.g. fabric, forge, neoforge, paper).")
     parser.add_argument("--dest", "-d", help="Destination folder (default: current directory).")
     parser.add_argument("--zip", action="store_true", help="Save as a single .zip instead of a folder.")
+    parser.add_argument(
+        "--mrpack", action="store_true",
+        help="Save as a .mrpack (Modrinth Modpack) instead of a folder — just download references for a "
+             "launcher like Prism/MultiMC, no actual files. Only works with fabric/forge/neoforge/quilt; "
+             "plugins and datapacks are left out.",
+    )
     parser.add_argument("--no-mods", action="store_true", help="Exclude mods, plugins and datapacks.")
     parser.add_argument("--no-resourcepacks", action="store_true", help="Exclude resource/texture packs.")
     parser.add_argument("--no-shaders", action="store_true", help="Exclude shaders.")
@@ -751,6 +928,14 @@ def main() -> None:
         print(t("error_no_loader"))
         sys.exit(1)
 
+    if args.zip and args.mrpack:
+        print("--zip and --mrpack can't be used together.")
+        sys.exit(1)
+    save_mode = "mrpack" if args.mrpack else ("zip" if args.zip else "folder")
+    if save_mode == "mrpack" and not is_mrpack_loader_supported(loader):
+        print(t("error_mrpack_unsupported_loader"))
+        sys.exit(1)
+
     dest = args.dest or prompt(t("prompt_dest"), default=".")
     if not dest:
         print(t("error_no_destination"))
@@ -772,7 +957,7 @@ def main() -> None:
         include_shaders=include_shaders,
         download_dependencies=not args.no_deps,
         prefer_stable=not args.allow_beta,
-        save_as_zip=args.zip,
+        save_mode=save_mode,
         destination_dir=dest,
         max_workers=max(1, args.workers),
         excluded_project_ids=excluded_ids,
@@ -795,7 +980,7 @@ def main() -> None:
             categories=categories,
             deps="yes" if options.download_dependencies else "no",
             stable="yes" if options.prefer_stable else "no",
-            save_mode="zip" if options.save_as_zip else "folder",
+            save_mode=options.save_mode,
             dest=dest,
             excluded_count=len(excluded_ids),
         ))

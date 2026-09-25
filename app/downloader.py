@@ -25,6 +25,7 @@ from typing import Callable, List, Optional, Set
 
 from .api import ModrinthClient, extract_collection_id, sanitize_filename
 from .i18n import t
+from . import mrpack
 
 # Known loaders, used only to decide the destination subfolder.
 PLUGIN_LOADERS = {
@@ -50,7 +51,8 @@ class DownloadOptions:
     include_shaders: bool = True
     download_dependencies: bool = True
     prefer_stable: bool = True
-    save_as_zip: bool = False
+    # "folder" | "zip" | "mrpack"
+    save_mode: str = "folder"
     destination_dir: str = ""
     max_workers: int = 5
     # Individual items the user unchecked in the items checklist (empty by
@@ -79,6 +81,13 @@ class DownloadResult:
     skipped: List[str] = field(default_factory=list)
     cancelled: bool = False
     error: Optional[str] = None
+    # Populated only in "mrpack" save mode: one modrinth.index.json "files"
+    # entry per included item, accumulated as projects resolve.
+    mrpack_files: List[dict] = field(default_factory=list)
+    # The loader version resolved for the .mrpack dependencies block, if any
+    # (None if the lookup failed — the pack is still written, just without
+    # a pinned loader version).
+    mrpack_loader_version: Optional[str] = None
 
 
 LogFn = Callable[[str], None]
@@ -215,6 +224,21 @@ class DownloadManager:
             count=len(project_ids),
         )
 
+        if options.save_mode == "mrpack":
+            if not mrpack.is_loader_supported(options.loader):
+                result.error = self._tr("msg_error_mrpack_unsupported_loader")
+                log_fn(result.error)
+                return result
+            self._log(log_fn, "log_resolving_loader_version", loader=options.loader)
+            result.mrpack_loader_version = mrpack.get_latest_loader_version(options.loader, options.mc_version)
+            if result.mrpack_loader_version:
+                self._log(
+                    log_fn, "log_loader_version_resolved",
+                    loader=options.loader, version=result.mrpack_loader_version,
+                )
+            else:
+                self._log(log_fn, "log_loader_version_unknown", loader=options.loader)
+
         # Download everything into a temp folder first; only move/zip to the
         # final destination once everything is done.
         work_root = tempfile.mkdtemp(prefix="modrinth_dl_")
@@ -329,8 +353,33 @@ class DownloadManager:
                     return
 
                 folder = self.categorize(project_type, chosen.get("loaders", []))
-                target_dir = os.path.join(work_dir, folder)
                 filename = file_info["filename"]
+
+                if options.save_mode == "mrpack":
+                    if folder not in mrpack.MRPACK_SUPPORTED_FOLDERS:
+                        log_line("log_mrpack_unsupported_category", name=display_name, type=folder)
+                        with self._lock:
+                            result.skipped.append(display_name)
+                        finish_main_unit()
+                        return
+
+                    entry = mrpack.build_file_entry(
+                        folder=folder,
+                        filename=filename,
+                        url=file_info["url"],
+                        size=file_info.get("size", 0),
+                        hashes=file_info.get("hashes"),
+                        client_side=project.get("client_side", "required"),
+                        server_side=project.get("server_side", "required"),
+                    )
+                    log_line("log_mrpack_file_added", name=display_name)
+                    with self._lock:
+                        result.mrpack_files.append(entry)
+                        result.success.append(display_name)
+                    finish_main_unit()
+                    return
+
+                target_dir = os.path.join(work_dir, folder)
                 dest_path = os.path.join(target_dir, filename)
 
                 log_line("log_downloading", name=display_name, filename=filename)
@@ -375,7 +424,7 @@ class DownloadManager:
             return result
 
         try:
-            if options.save_as_zip:
+            if options.save_mode == "zip":
                 self._log(log_fn, "log_zipping", name=collection_name)
                 zip_base = self._unique_path(
                     os.path.join(options.destination_dir, collection_name), ".zip"
@@ -384,6 +433,21 @@ class DownloadManager:
                     zip_base, "zip", root_dir=work_root, base_dir=collection_name
                 )
                 result.output_path = zip_base + ".zip"
+            elif options.save_mode == "mrpack":
+                self._log(log_fn, "log_building_mrpack")
+                os.makedirs(options.destination_dir, exist_ok=True)
+                index_data = mrpack.build_index(
+                    name=collection.get("name") or collection_name,
+                    mc_version=options.mc_version,
+                    loader=options.loader,
+                    loader_version=result.mrpack_loader_version,
+                    files=result.mrpack_files,
+                )
+                mrpack_base = self._unique_path(
+                    os.path.join(options.destination_dir, collection_name), ".mrpack"
+                )
+                mrpack.write_mrpack(index_data, mrpack_base + ".mrpack")
+                result.output_path = mrpack_base + ".mrpack"
             else:
                 self._log(log_fn, "log_moving", path=options.destination_dir)
                 final_dir = self._unique_path(

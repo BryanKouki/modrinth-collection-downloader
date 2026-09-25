@@ -28,6 +28,7 @@ import customtkinter as ctk
 
 from .downloader import DownloadManager, DownloadOptions, DownloadResult, ResultItem
 from .i18n import t
+from . import mrpack
 from .version import APP_VERSION, AUTHOR, GITHUB_URL
 
 # ---------------------------------------------------------------------------
@@ -546,10 +547,18 @@ class ModrinthDownloaderApp(ctk.CTk):
         save_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 10))
         row += 1
         self.var_save_mode = ctk.StringVar(value="folder")
-        self.radio_folder = self._radio(save_row, "radio_save_folder", self.var_save_mode, "folder")
+        self.radio_folder = self._radio(
+            save_row, "radio_save_folder", self.var_save_mode, "folder", command=self._on_save_mode_changed,
+        )
         self.radio_folder.pack(side="left", padx=(0, 20))
-        self.radio_zip = self._radio(save_row, "radio_save_zip", self.var_save_mode, "zip")
-        self.radio_zip.pack(side="left")
+        self.radio_zip = self._radio(
+            save_row, "radio_save_zip", self.var_save_mode, "zip", command=self._on_save_mode_changed,
+        )
+        self.radio_zip.pack(side="left", padx=(0, 20))
+        self.radio_mrpack = self._radio(
+            save_row, "radio_save_mrpack", self.var_save_mode, "mrpack", command=self._on_save_mode_changed,
+        )
+        self.radio_mrpack.pack(side="left")
 
         dest_row = ctk.CTkFrame(inner, fg_color="transparent")
         dest_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 4))
@@ -566,11 +575,13 @@ class ModrinthDownloaderApp(ctk.CTk):
         self.lbl_destination_value.grid(row=0, column=1, sticky="ew", padx=(12, 0))
         self.destination_dir = ""
 
-        self.lbl_hint_output = self._label(
-            inner, "hint_output_name", font=ctk.CTkFont(size=11), text_color=GRAY, anchor="w",
+        self.lbl_hint_output = ctk.CTkLabel(
+            inner, text="", font=ctk.CTkFont(size=11), text_color=GRAY, anchor="w",
+            justify="left", wraplength=560,
         )
         self.lbl_hint_output.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 16))
         row += 1
+        self._active_hint_key = "hint_output_name"
 
         # Download CTA
         self.btn_download = self._button(
@@ -728,6 +739,7 @@ class ModrinthDownloaderApp(ctk.CTk):
         self.btn_download.configure(text=t(L, "btn_downloading" if self.is_running else "btn_download"))
         self.lbl_status.configure(text=t(L, "status_running" if self.is_running else "status_idle"))
         self.btn_toggle_log.configure(text=t(L, "btn_hide_log" if self.log_visible else "btn_show_log"))
+        self.lbl_hint_output.configure(text=t(L, self._active_hint_key))
 
         self._render_items_checklist()
 
@@ -782,6 +794,11 @@ class ModrinthDownloaderApp(ctk.CTk):
         if path:
             self.destination_dir = path
             self.lbl_destination_value.configure(text=path)
+
+    def _on_save_mode_changed(self) -> None:
+        mode = self.var_save_mode.get()
+        self._active_hint_key = "hint_mrpack" if mode == "mrpack" else "hint_output_name"
+        self.lbl_hint_output.configure(text=t(self.lang, self._active_hint_key))
 
     # ------------------------------------------------------------------
     # Items checklist (individual mods/resourcepacks/shaders in the
@@ -1039,6 +1056,9 @@ class ModrinthDownloaderApp(ctk.CTk):
         if not loader:
             messagebox.showerror(t(L, "msg_error_title"), t(L, "msg_error_no_loader"))
             return
+        if self.var_save_mode.get() == "mrpack" and not mrpack.is_loader_supported(loader):
+            messagebox.showerror(t(L, "msg_error_title"), t(L, "msg_error_mrpack_unsupported_loader"))
+            return
         if not (self.var_include_mods.get() or self.var_include_resourcepacks.get() or self.var_include_shaders.get()):
             messagebox.showerror(t(L, "msg_error_title"), t(L, "msg_error_no_category"))
             return
@@ -1061,7 +1081,7 @@ class ModrinthDownloaderApp(ctk.CTk):
             include_shaders=self.var_include_shaders.get(),
             download_dependencies=self.var_dependencies.get(),
             prefer_stable=self.var_prefer_stable.get(),
-            save_as_zip=(self.var_save_mode.get() == "zip"),
+            save_mode=self.var_save_mode.get(),
             destination_dir=self.destination_dir,
             excluded_project_ids=excluded_ids,
             known_names=known_names,

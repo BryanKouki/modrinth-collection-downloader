@@ -35,6 +35,7 @@ Made by [BryanKouki](https://github.com/BryanKouki) - v1.0.0
 - [Command-line (CLI) edition](#command-line-cli-edition)
 - [Native OS scripts (no Python required)](#native-os-scripts-no-python-required)
 - [How folders are organized](#how-folders-are-organized)
+- [Exporting as a .mrpack (Modrinth Modpack)](#exporting-as-a-mrpack-modrinth-modpack)
 - [Requirements](#requirements)
 - [Running in development mode](#running-in-development-mode)
 - [Building the Windows executable (.exe)](#building-the-windows-executable-exe)
@@ -106,9 +107,11 @@ no command-line arguments and no configuration files to edit by hand.
 - Optional preference for the latest stable release over newer alpha or
   beta builds.
 - Automatic sorting into category subfolders, described in detail below.
-- Save as an organized folder or as a single `.zip`, always named after
-  the real collection name, and never overwriting an existing folder or
-  zip file: it appends " (2)", " (3)", and so on instead.
+- Save as an organized folder, a single `.zip`, or a `.mrpack` (Modrinth
+  Modpack, for launchers like Prism/MultiMC) — always named after the real
+  collection name, and never overwriting an existing folder or file: it
+  appends " (2)", " (3)", and so on instead. See
+  [Exporting as a .mrpack](#exporting-as-a-mrpack-modrinth-modpack).
 - Collapsible, color-coded activity log: green for success, red for
   failures, orange for incompatible items, gray for skipped ones, hidden
   by default to keep the window compact and one click away when needed.
@@ -215,6 +218,7 @@ list from the terminal itself.
 | `--loader`, `-l` | Mod loader (e.g. `fabric`, `forge`, `neoforge`, `paper`) |
 | `--dest`, `-d` | Destination folder (default: current directory) |
 | `--zip` | Save as a single `.zip` instead of a folder |
+| `--mrpack` | Save as a `.mrpack` (Modrinth Modpack) instead of a folder; see [Exporting as a .mrpack](#exporting-as-a-mrpack-modrinth-modpack) |
 | `--no-mods` | Exclude mods, plugins and datapacks |
 | `--no-resourcepacks` | Exclude resource/texture packs |
 | `--no-shaders` | Exclude shaders |
@@ -251,11 +255,11 @@ native/
 
 They cover the same core functionality as `modrinth_cli.py` (categorized
 folders, dependency resolution, stable-release preference, exclusion by
-ID, `.zip` or folder output, never overwriting an existing destination,
-bilingual output) using only what Windows, Linux, and macOS already
-include. They download sequentially rather than in parallel, trading a
-bit of speed for scripts that are much simpler and easier to audit line
-by line.
+ID, `.zip`/`.mrpack`/folder output, never overwriting an existing
+destination, bilingual output) using only what Windows, Linux, and macOS
+already include. They download sequentially rather than in parallel,
+trading a bit of speed for scripts that are much simpler and easier to
+audit line by line.
 
 ### Windows: `modrinth_dl.bat`
 
@@ -281,8 +285,8 @@ not an issue; no system-wide policy change is made.
 
 Run `native\windows\modrinth_dl.bat -Help` to see every option — they
 mirror `modrinth_cli.py`'s flags, spelled the PowerShell way
-(`-McVersion`, `-Loader`, `-Zip`, `-NoMods`, `-Exclude`, `-ListItems`,
-`-Lang`, `-Yes`, and so on).
+(`-McVersion`, `-Loader`, `-Zip`, `-Mrpack`, `-NoMods`, `-Exclude`,
+`-ListItems`, `-Lang`, `-Yes`, and so on).
 
 ### Linux and macOS: `modrinth_dl.sh`
 
@@ -319,14 +323,15 @@ chmod +x native/unix/modrinth_dl.sh
 
 It is written against the plain Bash that macOS ships by default
 (version 3.2), not just modern Bash, so it works without installing
-anything else first. Saving as `--zip` additionally requires the `zip`
-command, which is preinstalled on macOS and most Linux desktop distributions
-(`sudo apt install zip` on a minimal Debian/Ubuntu system that lacks it).
+anything else first. Saving as `--zip` or `--mrpack` additionally requires
+the `zip` command, which is preinstalled on macOS and most Linux desktop
+distributions (`sudo apt install zip` on a minimal Debian/Ubuntu system
+that lacks it).
 
 Run `./native/unix/modrinth_dl.sh --help` to see every option — the flags
 match `modrinth_cli.py` exactly (`-v`/`--mc-version`, `-l`/`--loader`,
-`--zip`, `--no-mods`, `--exclude`, `--list-items`, `--lang`, `-y`, and so
-on).
+`--zip`, `--mrpack`, `--no-mods`, `--exclude`, `--list-items`, `--lang`,
+`-y`, and so on).
 
 ---
 
@@ -351,6 +356,75 @@ prevent a plugin that only has a "paper" build from being recognized. If
 there is no version for the mod loader picked, the app automatically falls
 back to accepting plugin or datapack versions, since those do not depend on
 the client-side mod loader at all.
+
+---
+
+## Exporting as a .mrpack (Modrinth Modpack)
+
+Every edition can also export the resolved collection as a `.mrpack` file —
+Modrinth's own modpack format, importable straight into launchers like
+[Prism Launcher](https://prismlauncher.org/), MultiMC, or ATLauncher.
+
+A `.mrpack` is fundamentally different from the folder/zip output: it does
+not contain the mods themselves, only a `modrinth.index.json` manifest
+listing each file's official download URL, hash, and size. The chosen
+launcher downloads the actual files itself when the pack is imported. Since
+the Modrinth API already returns a file's hash alongside its version data,
+building a `.mrpack` needs **no extra file downloads at all** — it is
+typically much faster than the folder/zip modes.
+
+### Limitations
+
+- Only works with the **fabric**, **forge**, **neoforge**, and **quilt**
+  mod loaders. `.mrpack` has no equivalent for server plugin loaders
+  (Paper, Spigot, and so on) or datapacks, so picking any other loader
+  with `.mrpack` selected is rejected up front with a clear error, before
+  anything is processed.
+- Plugins and datapacks are always left out of the pack, even if their
+  category checkbox is enabled — they simply do not fit the format. Each
+  one is logged as skipped, with the reason, same as everywhere else in
+  this app.
+- The pack's `dependencies` block needs a concrete loader *version*
+  (e.g. Fabric Loader `0.15.11`), not just its name, which is all the
+  Modrinth API knows. To resolve that, this feature is the one part of the
+  app that talks to services other than Modrinth — each loader's own
+  official metadata API, and only when `.mrpack` is the chosen format:
+
+  | Loader | Metadata source |
+  |---|---|
+  | Fabric | `meta.fabricmc.net` |
+  | Quilt | `meta.quiltmc.org` |
+  | Forge | `files.minecraftforge.net` |
+  | NeoForge | `maven.neoforged.net` |
+
+  If that lookup fails for any reason (offline, a service hiccup), the
+  `.mrpack` is still generated — just without a pinned loader version — and
+  a clear warning explains that the version may need to be set manually
+  after importing.
+
+### Using it
+
+**GUI** — pick the third "Where to save" option, `.mrpack (Modrinth
+Modpack)`; the hint text underneath updates with the same limitations
+listed above.
+
+**CLI (`modrinth_cli.py`)** — pass `--mrpack` instead of `--zip`:
+
+```bash
+python modrinth_cli.py --collection N6yU1DBr --mc-version 1.21.1 --loader fabric --dest ./out --mrpack -y
+```
+
+**Windows (`modrinth_dl.ps1` / `.bat`)** — pass `-Mrpack`:
+
+```bat
+native\windows\modrinth_dl.bat -Collection N6yU1DBr -McVersion 1.21.1 -Loader fabric -Dest .\out -Mrpack -Yes
+```
+
+**Linux/macOS (`modrinth_dl.sh`)** — pass `--mrpack`:
+
+```bash
+./native/unix/modrinth_dl.sh -c N6yU1DBr -v 1.21.1 -l fabric -d ./out --mrpack -y
+```
 
 ---
 
@@ -595,6 +669,14 @@ Yes. Replace `icon.ico` (and, ideally, `icon.png` with the same image) in
 the project root with your own files before building. `build.bat` and the
 running app both pick them up automatically; nothing else needs to change.
 
+**Can I import the result straight into Prism Launcher or MultiMC?**
+
+Yes, if you save it as a `.mrpack` instead of a folder or `.zip`. It only
+works with the fabric, forge, neoforge, or quilt loaders (plugins and
+datapacks are left out), and it does not contain the mods themselves —
+the launcher downloads those itself when you import the pack. See
+[Exporting as a .mrpack](#exporting-as-a-mrpack-modrinth-modpack).
+
 ---
 
 ## Security and privacy
@@ -615,6 +697,13 @@ running app both pick them up automatically; nothing else needs to change.
   domains, and nothing to audit beyond PowerShell/Bash plus, for the Unix
   script, `curl` and `jq` — both widely used, independently maintained
   tools, not something bundled or controlled by this project.
+- The one exception, in every edition, is exporting a `.mrpack`: resolving
+  a concrete loader version additionally contacts that loader's own
+  official metadata API (`meta.fabricmc.net`, `meta.quiltmc.org`,
+  `files.minecraftforge.net`, or `maven.neoforged.net`), and only while
+  that export is running. See
+  [Exporting as a .mrpack](#exporting-as-a-mrpack-modrinth-modpack) for the
+  full breakdown of which loader uses which domain.
 
 ---
 

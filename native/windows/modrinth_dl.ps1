@@ -60,6 +60,7 @@ param(
     [string]$Loader,
     [string]$Dest,
     [switch]$Zip,
+    [switch]$Mrpack,
     [switch]$NoMods,
     [switch]$NoResourcepacks,
     [switch]$NoShaders,
@@ -111,12 +112,18 @@ $Messages = @{
         err_no_version                       = "No Minecraft version was given."
         err_no_loader                         = "No mod loader was given."
         err_no_category                        = "At least one category must be left enabled."
+        err_mrpack_unsupported_loader           = ".mrpack only supports the fabric, forge, neoforge or quilt loaders. Pick one of those, or choose a different save format."
         info_fetching_collection                = "Fetching collection information..."
         info_fetching_items                      = "Fetching item details..."
         info_aborted                              = "Aborted."
         items_header                               = "Items in this collection:"
         log_start                                   = "Starting download..."
         log_zipping                                  = "Zipping files..."
+        log_resolving_loader_version                  = "Resolving the latest loader version..."
+        log_loader_version_unknown                      = "Could not automatically determine the loader version - you may need to set it manually after importing the pack."
+        log_building_mrpack                              = "Building the .mrpack file..."
+        log_mrpack_file_added                             = "added to the modpack index."
+        log_mrpack_unsupported_category                    = "files aren't supported in .mrpack (only mods, resource packs and shaders are)."
         log_moving                                    = "Moving files to the destination..."
         log_done                                       = "Download finished."
         reason_project_not_found                        = "could not fetch the project's details"
@@ -140,12 +147,18 @@ $Messages = @{
         err_no_version                       = "Nenhuma versao do Minecraft foi informada."
         err_no_loader                         = "Nenhum mod loader foi informado."
         err_no_category                        = "Pelo menos uma categoria precisa ficar habilitada."
+        err_mrpack_unsupported_loader           = ".mrpack so e compativel com os loaders fabric, forge, neoforge ou quilt. Escolha um deles, ou selecione outro formato pra salvar."
         info_fetching_collection                = "Buscando informacoes da colecao..."
         info_fetching_items                      = "Buscando detalhes dos itens..."
         info_aborted                              = "Cancelado."
         items_header                               = "Itens desta colecao:"
         log_start                                   = "Iniciando download..."
         log_zipping                                  = "Compactando arquivos..."
+        log_resolving_loader_version                  = "Resolvendo a versao mais recente do loader..."
+        log_loader_version_unknown                      = "Nao foi possivel determinar automaticamente a versao do loader - talvez seja necessario ajustar manualmente depois de importar o pacote."
+        log_building_mrpack                              = "Montando o arquivo .mrpack..."
+        log_mrpack_file_added                             = "adicionado ao indice do modpack."
+        log_mrpack_unsupported_category                    = "nao sao suportados em .mrpack (so mods, resource packs e shaders sao)."
         log_moving                                    = "Movendo arquivos para o destino..."
         log_done                                       = "Download finalizado."
         reason_project_not_found                        = "nao foi possivel obter os dados do projeto"
@@ -178,6 +191,10 @@ Usage: modrinth_dl.ps1 [options]
   -Loader LOADER            Mod loader (e.g. fabric, forge, neoforge, paper)
   -Dest PATH                Destination folder (default: current directory)
   -Zip                      Save as a single .zip instead of a folder
+  -Mrpack                   Save as a .mrpack (Modrinth Modpack) instead of a folder -
+                            just download references for a launcher like Prism/MultiMC,
+                            no actual files. Only works with fabric/forge/neoforge/quilt;
+                            plugins and datapacks are left out.
   -NoMods                   Exclude mods, plugins and datapacks
   -NoResourcepacks          Exclude resource/texture packs
   -NoShaders                Exclude shaders
@@ -319,6 +336,126 @@ function Select-Version {
 }
 
 # ---------------------------------------------------------------------------
+# .mrpack (Modrinth Modpack) export
+# ---------------------------------------------------------------------------
+# A .mrpack only needs each file's official download URL and hash - both
+# already included in the version data the Modrinth API returns - so
+# building one requires no extra file downloads at all. Resolving a
+# concrete loader *version*, though, needs each loader's own official
+# metadata API (the Modrinth API only knows the loader's name):
+#
+#   Fabric   -> meta.fabricmc.net      Forge    -> files.minecraftforge.net
+#   Quilt    -> meta.quiltmc.org       NeoForge -> maven.neoforged.net
+#
+# These are only ever contacted when -Mrpack is used.
+
+$MrpackDependencyKey = @{
+    fabric = "fabric-loader"
+    quilt = "quilt-loader"
+    forge = "forge"
+    neoforge = "neoforge"
+}
+$MrpackSupportedFolders = @("mods", "resourcepacks", "shaderpacks")
+
+function Test-MrpackLoaderSupported {
+    param([string]$LoaderName)
+    return $MrpackDependencyKey.ContainsKey($LoaderName.ToLower())
+}
+
+function Get-LatestLoaderVersion {
+    param([string]$LoaderName, [string]$TargetMcVersion)
+    $loaderLower = $LoaderName.ToLower()
+    try {
+        if ($loaderLower -eq "fabric") {
+            $versions = Invoke-RestMethod -Uri "https://meta.fabricmc.net/v2/versions/loader" -TimeoutSec 15 -ErrorAction Stop
+            $stable = @($versions | Where-Object { $_.loader.stable })
+            $pick = if ($stable.Count -gt 0) { $stable[0] } elseif (@($versions).Count -gt 0) { $versions[0] } else { $null }
+            if ($pick) { return $pick.loader.version }
+            return $null
+        }
+        if ($loaderLower -eq "quilt") {
+            $versions = @(Invoke-RestMethod -Uri "https://meta.quiltmc.org/v3/versions/loader" -TimeoutSec 15 -ErrorAction Stop)
+            if ($versions.Count -gt 0) { return $versions[0].version }
+            return $null
+        }
+        if ($loaderLower -eq "forge") {
+            $data = Invoke-RestMethod -Uri "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json" -TimeoutSec 15 -ErrorAction Stop
+            $recKey = "$TargetMcVersion-recommended"
+            $latKey = "$TargetMcVersion-latest"
+            $value = $data.promos.$recKey
+            if (-not $value) { $value = $data.promos.$latKey }
+            return $value
+        }
+        if ($loaderLower -eq "neoforge") {
+            $data = Invoke-RestMethod -Uri "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge" -TimeoutSec 15 -ErrorAction Stop
+            $versions = @($data.versions)
+            $parts = $TargetMcVersion -split '\.'
+            if ($parts.Count -ge 2) {
+                $minor = $parts[1]
+                $patch = if ($parts.Count -gt 2) { $parts[2] } else { "0" }
+                $prefix = "$minor.$patch."
+                $matching = @($versions | Where-Object { $_.StartsWith($prefix) })
+                if ($matching.Count -gt 0) { return $matching[-1] }
+            }
+            if ($versions.Count -gt 0) { return $versions[-1] }
+            return $null
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+function New-MrpackFileEntry {
+    param([string]$Folder, [string]$Filename, [string]$Url, $Size, $Hashes, [string]$ClientSide, [string]$ServerSide)
+    $hashObj = [ordered]@{}
+    if ($Hashes) {
+        if ($Hashes.sha1) { $hashObj["sha1"] = $Hashes.sha1 }
+        if ($Hashes.sha512) { $hashObj["sha512"] = $Hashes.sha512 }
+    }
+    return [PSCustomObject]@{
+        path      = "$Folder/$Filename"
+        hashes    = $hashObj
+        env       = [PSCustomObject]@{
+            client = if ($ClientSide) { $ClientSide } else { "required" }
+            server = if ($ServerSide) { $ServerSide } else { "required" }
+        }
+        downloads = @($Url)
+        fileSize  = if ($Size) { $Size } else { 0 }
+    }
+}
+
+function New-MrpackIndex {
+    param([string]$Name, [string]$TargetMcVersion, [string]$LoaderName, [string]$LoaderVersion, [array]$Files)
+    $dependencies = [ordered]@{ minecraft = $TargetMcVersion }
+    $depKey = $MrpackDependencyKey[$LoaderName.ToLower()]
+    if ($depKey -and $LoaderVersion) {
+        $dependencies[$depKey] = $LoaderVersion
+    }
+    return [PSCustomObject]@{
+        formatVersion = 1
+        game          = "minecraft"
+        versionId     = "1.0.0"
+        name          = $Name
+        files         = @($Files)
+        dependencies  = $dependencies
+    }
+}
+
+function Write-MrpackFile {
+    param($IndexData, [string]$OutputPath)
+    $json = $IndexData | ConvertTo-Json -Depth 10
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("mrpack_build_" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $indexPath = Join-Path $tempDir "modrinth.index.json"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($indexPath, $json, $utf8NoBom)
+    if (Test-Path -LiteralPath $OutputPath) { Remove-Item -LiteralPath $OutputPath -Force }
+    Compress-Archive -Path $indexPath -DestinationPath $OutputPath -Force
+    Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
 # Shared mutable state (script scope, updated from Invoke-ProcessProject)
 # ---------------------------------------------------------------------------
 
@@ -330,6 +467,8 @@ $script:SkippedCount = 0
 $script:FailedItems = @()
 $script:IncompatibleItems = @()
 $script:ExcludedIds = @()
+$script:MrpackFiles = @()
+$script:MrpackLoaderVersion = $null
 $script:WorkDir = ""
 $script:IncludeMods = -not $NoMods
 $script:IncludeResourcepacks = -not $NoResourcepacks
@@ -414,9 +553,26 @@ function Invoke-ProcessProject {
 
     $loaders = @($chosen.loaders)
     $folder = Get-Category -ProjectType $ptype -Loaders $loaders
-    $destPath = Join-Path $script:WorkDir (Join-Path $folder $fileInfo.filename)
+    $filename = $fileInfo.filename
 
-    Write-Host "DOWNLOADING: $name -> $($fileInfo.filename)"
+    if ($Mrpack) {
+        if ($MrpackSupportedFolders -notcontains $folder) {
+            Write-Host "SKIPPED: $name - $folder $(T 'log_mrpack_unsupported_category')"
+            $script:SkippedCount++
+            return
+        }
+        $entry = New-MrpackFileEntry -Folder $folder -Filename $filename -Url $fileInfo.url `
+            -Size $fileInfo.size -Hashes $fileInfo.hashes `
+            -ClientSide $proj.client_side -ServerSide $proj.server_side
+        Write-Host "OK: $name $(T 'log_mrpack_file_added')"
+        $script:MrpackFiles += $entry
+        $script:SuccessCount++
+        return
+    }
+
+    $destPath = Join-Path $script:WorkDir (Join-Path $folder $filename)
+
+    Write-Host "DOWNLOADING: $name -> $filename"
     if (Download-File -Url $fileInfo.url -Destination $destPath) {
         Write-Host "OK: $name saved to $folder/"
         $script:SuccessCount++
@@ -431,7 +587,26 @@ function Invoke-ProcessProject {
 # Main
 # ---------------------------------------------------------------------------
 
+function Reset-ScriptState {
+    # Resets every mutable script-scoped variable to its default. Called at
+    # the top of Invoke-Main so that calling it more than once in the same
+    # session (e.g. a test harness dot-sourcing this file) behaves the same
+    # as a fresh process each time - which is how the script is actually
+    # used in practice (one invocation, one process).
+    $script:Processed = New-Object 'System.Collections.Generic.HashSet[string]'
+    $script:SuccessCount = 0
+    $script:FailedCount = 0
+    $script:IncompatibleCount = 0
+    $script:SkippedCount = 0
+    $script:FailedItems = @()
+    $script:IncompatibleItems = @()
+    $script:ExcludedIds = @()
+    $script:MrpackFiles = @()
+    $script:MrpackLoaderVersion = $null
+}
+
 function Invoke-Main {
+Reset-ScriptState
 
 if ([string]::IsNullOrWhiteSpace($Collection)) {
     $Collection = Read-Host -Prompt (T 'prompt_collection')
@@ -493,6 +668,15 @@ if ([string]::IsNullOrWhiteSpace($Loader)) {
     exit 1
 }
 
+if ($Zip -and $Mrpack) {
+    Write-Host "-Zip and -Mrpack can't be used together."
+    exit 1
+}
+if ($Mrpack -and -not (Test-MrpackLoaderSupported $Loader)) {
+    Write-Host (T 'err_mrpack_unsupported_loader')
+    exit 1
+}
+
 if ([string]::IsNullOrWhiteSpace($Dest)) {
     $Dest = Read-Host -Prompt (T 'prompt_dest')
     if ([string]::IsNullOrWhiteSpace($Dest)) { $Dest = "." }
@@ -513,7 +697,9 @@ if (-not $Yes) {
     Write-Host "MC version : $McVersion"
     Write-Host "Loader     : $Loader"
     Write-Host "Destination: $Dest"
-    if ($Zip) { Write-Host "Save as    : zip" } else { Write-Host "Save as    : folder" }
+    if ($Mrpack) { Write-Host "Save as    : mrpack" }
+    elseif ($Zip) { Write-Host "Save as    : zip" }
+    else { Write-Host "Save as    : folder" }
     $ans = Read-Host -Prompt (T 'prompt_confirm')
     if (-not [string]::IsNullOrWhiteSpace($ans)) {
         $firstChar = $ans.Substring(0, 1).ToLower()
@@ -546,6 +732,17 @@ $collectionName = Get-SafeFilename $collectionNameRaw
 
 Write-Host "Collection found: '$collectionNameRaw' with $($projectIds.Count) item(s)."
 
+if ($Mrpack) {
+    Write-Host (T 'log_resolving_loader_version')
+    $script:MrpackLoaderVersion = Get-LatestLoaderVersion -LoaderName $Loader -TargetMcVersion $McVersion
+    if ($script:MrpackLoaderVersion) {
+        Write-Host "Using $Loader version $($script:MrpackLoaderVersion)."
+    } else {
+        Write-Host (T 'log_loader_version_unknown')
+    }
+}
+
+
 $workRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("modrinth_dl_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 8))
 $script:WorkDir = Join-Path $workRoot $collectionName
 New-Item -ItemType Directory -Path $script:WorkDir -Force | Out-Null
@@ -556,7 +753,16 @@ foreach ($projId in $projectIds) {
 
 $outputPath = ""
 try {
-    if ($Zip) {
+    if ($Mrpack) {
+        Write-Host (T 'log_building_mrpack')
+        if (-not (Test-Path -LiteralPath $Dest)) { New-Item -ItemType Directory -Path $Dest -Force | Out-Null }
+        $mrpackBase = Get-UniquePath (Join-Path $Dest $collectionName) ".mrpack"
+        $indexName = if ($collectionJson.name) { $collectionJson.name } else { $collectionName }
+        $indexData = New-MrpackIndex -Name $indexName -TargetMcVersion $McVersion -LoaderName $Loader `
+            -LoaderVersion $script:MrpackLoaderVersion -Files $script:MrpackFiles
+        Write-MrpackFile -IndexData $indexData -OutputPath "$mrpackBase.mrpack"
+        $outputPath = "$mrpackBase.mrpack"
+    } elseif ($Zip) {
         Write-Host (T 'log_zipping')
         if (-not (Test-Path -LiteralPath $Dest)) { New-Item -ItemType Directory -Path $Dest -Force | Out-Null }
         $zipBase = Get-UniquePath (Join-Path $Dest $collectionName) ".zip"

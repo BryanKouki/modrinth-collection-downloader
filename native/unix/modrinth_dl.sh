@@ -72,12 +72,18 @@ msg() {
             err_zip_missing) echo "O comando 'zip' não foi encontrado. Instale-o (ex: sudo apt install zip) ou rode sem --zip." ;;
             err_jq_missing) echo "O comando 'jq' é necessário e não foi encontrado. Instale-o (veja o topo deste arquivo)." ;;
             err_curl_missing) echo "O comando 'curl' é necessário e não foi encontrado." ;;
+            err_mrpack_unsupported_loader) echo ".mrpack só é compatível com os loaders fabric, forge, neoforge ou quilt. Escolha um deles, ou selecione outro formato pra salvar." ;;
             info_fetching_collection) echo "Buscando informações da coleção..." ;;
             info_fetching_items) echo "Buscando detalhes dos itens..." ;;
             info_aborted) echo "Cancelado." ;;
             items_header) echo "Itens desta coleção:" ;;
             log_start) echo "Iniciando download..." ;;
             log_zipping) echo "Compactando arquivos..." ;;
+            log_resolving_loader_version) echo "Resolvendo a versão mais recente do loader..." ;;
+            log_loader_version_unknown) echo "Não foi possível determinar automaticamente a versão do loader — talvez seja necessário ajustar manualmente depois de importar o pacote." ;;
+            log_building_mrpack) echo "Montando o arquivo .mrpack..." ;;
+            log_mrpack_file_added) echo "adicionado ao índice do modpack." ;;
+            log_mrpack_unsupported_category) echo "não são suportados em .mrpack (só mods, resource packs e shaders são)." ;;
             log_moving) echo "Movendo arquivos para o destino..." ;;
             log_done) echo "Download finalizado." ;;
             reason_project_not_found) echo "não foi possível obter os dados do projeto" ;;
@@ -107,12 +113,18 @@ msg() {
             err_zip_missing) echo "The 'zip' command was not found. Install it (e.g. sudo apt install zip) or run without --zip." ;;
             err_jq_missing) echo "The 'jq' command is required and was not found. Install it (see the top of this file)." ;;
             err_curl_missing) echo "The 'curl' command is required and was not found." ;;
+            err_mrpack_unsupported_loader) echo ".mrpack only supports the fabric, forge, neoforge or quilt loaders. Pick one of those, or choose a different save format." ;;
             info_fetching_collection) echo "Fetching collection information..." ;;
             info_fetching_items) echo "Fetching item details..." ;;
             info_aborted) echo "Aborted." ;;
             items_header) echo "Items in this collection:" ;;
             log_start) echo "Starting download..." ;;
             log_zipping) echo "Zipping files..." ;;
+            log_resolving_loader_version) echo "Resolving the latest loader version..." ;;
+            log_loader_version_unknown) echo "Could not automatically determine the loader version - you may need to set it manually after importing the pack." ;;
+            log_building_mrpack) echo "Building the .mrpack file..." ;;
+            log_mrpack_file_added) echo "added to the modpack index." ;;
+            log_mrpack_unsupported_category) echo "aren't supported in .mrpack (only mods, resource packs and shaders are)." ;;
             log_moving) echo "Moving files to the destination..." ;;
             log_done) echo "Download finished." ;;
             reason_project_not_found) echo "could not fetch the project's details" ;;
@@ -255,6 +267,140 @@ select_version() {
 }
 
 # ---------------------------------------------------------------------------
+# .mrpack (Modrinth Modpack) export
+# ---------------------------------------------------------------------------
+# A .mrpack only needs each file's official download URL and hash - both
+# already included in the version data the Modrinth API returns - so
+# building one requires no extra file downloads at all. Resolving a
+# concrete loader *version*, though, needs each loader's own official
+# metadata API (the Modrinth API only knows the loader's name):
+#
+#   Fabric   -> meta.fabricmc.net      Forge    -> files.minecraftforge.net
+#   Quilt    -> meta.quiltmc.org       NeoForge -> maven.neoforged.net
+#
+# These are only ever contacted when --mrpack is used.
+
+MRPACK_SUPPORTED_FOLDERS="mods resourcepacks shaderpacks"
+
+is_mrpack_loader_supported() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        fabric|forge|neoforge|quilt) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+mrpack_dependency_key() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        fabric) echo "fabric-loader" ;;
+        quilt) echo "quilt-loader" ;;
+        forge) echo "forge" ;;
+        neoforge) echo "neoforge" ;;
+    esac
+}
+
+get_latest_loader_version() {
+    # $1 = loader, $2 = mc version. Prints the resolved version, or nothing on failure.
+    local loader mcv json
+    loader=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    mcv="$2"
+    case "$loader" in
+        fabric)
+            json=$(curl -fsSL --max-time 15 -H "User-Agent: $USER_AGENT" "https://meta.fabricmc.net/v2/versions/loader" 2>/dev/null) || return 1
+            printf '%s' "$json" | jq -r '
+                ([.[] | select(.loader.stable == true)] + .) [0].loader.version // empty
+            '
+            ;;
+        quilt)
+            json=$(curl -fsSL --max-time 15 -H "User-Agent: $USER_AGENT" "https://meta.quiltmc.org/v3/versions/loader" 2>/dev/null) || return 1
+            printf '%s' "$json" | jq -r '.[0].version // empty'
+            ;;
+        forge)
+            json=$(curl -fsSL --max-time 15 -H "User-Agent: $USER_AGENT" "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json" 2>/dev/null) || return 1
+            printf '%s' "$json" | jq -r --arg mcv "$mcv" '
+                (.promos[($mcv + "-recommended")] // .promos[($mcv + "-latest")] // empty)
+            '
+            ;;
+        neoforge)
+            json=$(curl -fsSL --max-time 15 -H "User-Agent: $USER_AGENT" "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge" 2>/dev/null) || return 1
+            local minor patch prefix
+            minor=$(printf '%s' "$mcv" | cut -d. -f2)
+            patch=$(printf '%s' "$mcv" | cut -d. -f3)
+            [ -z "$patch" ] && patch="0"
+            prefix="${minor}.${patch}."
+            printf '%s' "$json" | jq -r --arg prefix "$prefix" '
+                ([.versions[]? | select(startswith($prefix))] | last) // (.versions | last) // empty
+            '
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+build_mrpack_file_entry() {
+    # $1=folder $2=filename $3=url $4=size $5=sha1 $6=sha512 $7=client_side $8=server_side
+    jq -n \
+        --arg path "$1/$2" \
+        --arg url "$3" \
+        --argjson size "${4:-0}" \
+        --arg sha1 "${5:-}" \
+        --arg sha512 "${6:-}" \
+        --arg client "${7:-required}" \
+        --arg server "${8:-required}" \
+        '{
+            path: $path,
+            hashes: (
+                (if $sha1 != "" then {sha1: $sha1} else {} end)
+                + (if $sha512 != "" then {sha512: $sha512} else {} end)
+            ),
+            env: {client: $client, server: $server},
+            downloads: [$url],
+            fileSize: $size
+        }'
+}
+
+build_mrpack_index() {
+    # $1=name $2=mc_version $3=loader $4=loader_version (may be empty) $5=newline-delimited JSON file entries
+    local name="$1" mcv="$2" loader="$3" loader_version="$4" entries="$5" dep_key
+    dep_key=$(mrpack_dependency_key "$loader")
+
+    local files_json
+    if [ -n "$entries" ]; then
+        files_json=$(printf '%s\n' "$entries" | jq -s '.')
+    else
+        files_json="[]"
+    fi
+
+    jq -n \
+        --arg name "$name" \
+        --arg mcv "$mcv" \
+        --arg depkey "$dep_key" \
+        --arg loaderver "$loader_version" \
+        --argjson files "$files_json" \
+        '{
+            formatVersion: 1,
+            game: "minecraft",
+            versionId: "1.0.0",
+            name: $name,
+            files: $files,
+            dependencies: (
+                {minecraft: $mcv}
+                + (if ($depkey != "" and $loaderver != "") then {($depkey): $loaderver} else {} end)
+            )
+        }'
+}
+
+write_mrpack() {
+    # $1 = index JSON, $2 = output .mrpack path
+    local index_json="$1" output_path="$2" tmp_dir
+    tmp_dir=$(mktemp -d)
+    printf '%s' "$index_json" > "${tmp_dir}/modrinth.index.json"
+    rm -f "$output_path"
+    ( cd "$tmp_dir" && zip -q "$output_path" "modrinth.index.json" )
+    rm -rf "$tmp_dir"
+}
+
+# ---------------------------------------------------------------------------
 # Global state (set by main/parse_args, mutated by process_project)
 # ---------------------------------------------------------------------------
 
@@ -263,6 +409,7 @@ MC_VERSION=""
 LOADER=""
 DEST=""
 SAVE_AS_ZIP=0
+SAVE_AS_MRPACK=0
 INCLUDE_MODS=1
 INCLUDE_RESOURCEPACKS=1
 INCLUDE_SHADERS=1
@@ -281,6 +428,8 @@ FAILED_LINES=""
 INCOMPATIBLE_LINES=""
 EXCLUDED_IDS=" "
 WORK_DIR=""
+MRPACK_FILES=""
+MRPACK_LOADER_VERSION=""
 
 print_help() {
     cat <<'HELP'
@@ -293,6 +442,10 @@ Usage: modrinth_dl.sh [options]
   -l, --loader LOADER          Mod loader (e.g. fabric, forge, neoforge, paper)
   -d, --dest PATH              Destination folder (default: current directory)
       --zip                    Save as a single .zip instead of a folder
+      --mrpack                 Save as a .mrpack (Modrinth Modpack) instead of a folder -
+                                just download references for a launcher like Prism/MultiMC,
+                                no actual files. Only works with fabric/forge/neoforge/quilt;
+                                plugins and datapacks are left out.
       --no-mods                Exclude mods, plugins and datapacks
       --no-resourcepacks       Exclude resource/texture packs
       --no-shaders             Exclude shaders
@@ -399,6 +552,32 @@ process_project() {
 
     loaders_lc=$(printf '%s' "$chosen" | jq -r '(.loaders // []) | map(ascii_downcase) | join(" ")')
     folder=$(categorize "$ptype" "$loaders_lc")
+
+    if [ "$SAVE_AS_MRPACK" = "1" ]; then
+        case " $MRPACK_SUPPORTED_FOLDERS " in
+            *" $folder "*) ;;
+            *)
+                echo "SKIPPED: ${name} - '${folder}' $(msg log_mrpack_unsupported_category)"
+                SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+                return
+                ;;
+        esac
+
+        local file_size file_sha1 file_sha512 client_side server_side entry
+        file_size=$(printf '%s' "$chosen" | jq -r '([.files[]? | select(.primary)] + .files)[0].size // 0')
+        file_sha1=$(printf '%s' "$chosen" | jq -r '([.files[]? | select(.primary)] + .files)[0].hashes.sha1 // empty')
+        file_sha512=$(printf '%s' "$chosen" | jq -r '([.files[]? | select(.primary)] + .files)[0].hashes.sha512 // empty')
+        client_side=$(printf '%s' "$proj" | jq -r '.client_side // "required"')
+        server_side=$(printf '%s' "$proj" | jq -r '.server_side // "required"')
+
+        entry=$(build_mrpack_file_entry "$folder" "$file_name" "$file_url" "$file_size" "$file_sha1" "$file_sha512" "$client_side" "$server_side")
+        echo "OK: ${name} $(msg log_mrpack_file_added)"
+        MRPACK_FILES="${MRPACK_FILES}${entry}
+"
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+        return
+    fi
+
     dest_path="${WORK_DIR}/${folder}/${file_name}"
 
     echo "DOWNLOADING: ${name} -> ${file_name}"
@@ -421,6 +600,7 @@ parse_args() {
             -l|--loader) LOADER="$2"; shift 2 ;;
             -d|--dest) DEST="$2"; shift 2 ;;
             --zip) SAVE_AS_ZIP=1; shift ;;
+            --mrpack) SAVE_AS_MRPACK=1; shift ;;
             --no-mods) INCLUDE_MODS=0; shift ;;
             --no-resourcepacks) INCLUDE_RESOURCEPACKS=0; shift ;;
             --no-shaders) INCLUDE_SHADERS=0; shift ;;
@@ -447,6 +627,7 @@ reset_state() {
     LOADER=""
     DEST=""
     SAVE_AS_ZIP=0
+    SAVE_AS_MRPACK=0
     INCLUDE_MODS=1
     INCLUDE_RESOURCEPACKS=1
     INCLUDE_SHADERS=1
@@ -466,6 +647,8 @@ reset_state() {
     INCOMPATIBLE_LINES=""
     EXCLUDED_IDS=" "
     WORK_DIR=""
+    MRPACK_FILES=""
+    MRPACK_LOADER_VERSION=""
 }
 
 main() {
@@ -481,6 +664,10 @@ main() {
         exit 1
     fi
     if [ "$SAVE_AS_ZIP" = "1" ] && ! command -v zip >/dev/null 2>&1; then
+        echo "$(msg err_zip_missing)" >&2
+        exit 1
+    fi
+    if [ "$SAVE_AS_MRPACK" = "1" ] && ! command -v zip >/dev/null 2>&1; then
         echo "$(msg err_zip_missing)" >&2
         exit 1
     fi
@@ -541,6 +728,15 @@ main() {
     fi
     [ -z "$LOADER" ] && { echo "$(msg err_no_loader)"; exit 1; }
 
+    if [ "$SAVE_AS_ZIP" = "1" ] && [ "$SAVE_AS_MRPACK" = "1" ]; then
+        echo "--zip and --mrpack can't be used together."
+        exit 1
+    fi
+    if [ "$SAVE_AS_MRPACK" = "1" ] && ! is_mrpack_loader_supported "$LOADER"; then
+        echo "$(msg err_mrpack_unsupported_loader)"
+        exit 1
+    fi
+
     if [ -z "$DEST" ]; then
         printf '%s' "$(msg prompt_dest)"
         read -r DEST
@@ -568,7 +764,13 @@ main() {
         echo "MC version : $MC_VERSION"
         echo "Loader     : $LOADER"
         echo "Destination: $DEST"
-        if [ "$SAVE_AS_ZIP" = "1" ]; then echo "Save as    : zip"; else echo "Save as    : folder"; fi
+        if [ "$SAVE_AS_MRPACK" = "1" ]; then
+            echo "Save as    : mrpack"
+        elif [ "$SAVE_AS_ZIP" = "1" ]; then
+            echo "Save as    : zip"
+        else
+            echo "Save as    : folder"
+        fi
         printf '%s' "$(msg prompt_confirm)"
         local ans first_char
         read -r ans
@@ -605,6 +807,16 @@ main() {
     item_count=$(printf '%s\n' "$project_ids" | grep -c .)
     echo "Collection found: '${collection_name_raw}' with ${item_count} item(s)."
 
+    if [ "$SAVE_AS_MRPACK" = "1" ]; then
+        echo "$(msg log_resolving_loader_version)"
+        MRPACK_LOADER_VERSION=$(get_latest_loader_version "$LOADER" "$MC_VERSION")
+        if [ -n "$MRPACK_LOADER_VERSION" ]; then
+            echo "Using ${LOADER} version ${MRPACK_LOADER_VERSION}."
+        else
+            echo "$(msg log_loader_version_unknown)"
+        fi
+    fi
+
     work_root=$(mktemp -d)
     WORK_DIR="${work_root}/${collection_name}"
     mkdir -p "$WORK_DIR"
@@ -615,7 +827,15 @@ main() {
     done <<< "$project_ids"
 
     local output_path
-    if [ "$SAVE_AS_ZIP" = "1" ]; then
+    if [ "$SAVE_AS_MRPACK" = "1" ]; then
+        echo "$(msg log_building_mrpack)"
+        mkdir -p "$DEST"
+        local mrpack_base index_json
+        mrpack_base=$(unique_path "${DEST%/}/${collection_name}" ".mrpack")
+        index_json=$(build_mrpack_index "$collection_name_raw" "$MC_VERSION" "$LOADER" "$MRPACK_LOADER_VERSION" "$MRPACK_FILES")
+        write_mrpack "$index_json" "${mrpack_base}.mrpack"
+        output_path="${mrpack_base}.mrpack"
+    elif [ "$SAVE_AS_ZIP" = "1" ]; then
         echo "$(msg log_zipping)"
         mkdir -p "$DEST"
         local zip_base
